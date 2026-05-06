@@ -83,11 +83,12 @@ export default async function SetupPage() {
           <article className="wiki-card">
             <div className="wiki-card-header">
               <h3>Scheduled full sync</h3>
-              <code>every 2 hours</code>
+              <code>2-hour cron ready</code>
             </div>
             <p>
-              Production will call <code>/api/cron/jira-sync</code> every 2 hours via Vercel Cron.
-              This does a full Jira import across the synced board scope.
+              The app is ready to call <code>/api/cron/jira-sync</code> every 2 hours via
+              Vercel Cron, but your current Vercel Hobby plan blocks sub-daily cron jobs.
+              Upgrade to Pro to activate the 2-hour full refresh.
             </p>
           </article>
           <article className="wiki-card">
@@ -114,7 +115,7 @@ export default async function SetupPage() {
         </div>
         <ol className="instruction-list">
           <li>Add `CRON_SECRET` and `JIRA_WEBHOOK_SECRET` to Vercel and `.env.local`.</li>
-          <li>Deploy with the new `vercel.json` cron schedule.</li>
+          <li>Upgrade the Vercel project to Pro if you want the 2-hour cron fallback.</li>
           <li>In Jira admin, create a webhook for `jira:issue_created`, `jira:issue_updated`, and `jira:issue_deleted` pointing to <code>{appOrigin || "https://your-app-domain"}/api/jira/webhook</code>.</li>
           <li>Set the webhook secret to the same value as `JIRA_WEBHOOK_SECRET`.</li>
         </ol>
