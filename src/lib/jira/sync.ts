@@ -34,6 +34,18 @@ type DerivedIssueMetrics = {
 
 type SyncTrigger = "manual" | "cron" | "webhook";
 
+type MemberAccumulator = {
+  displayName: string;
+  completedIssues: number;
+  notCompletedIssues: number;
+  abandonedIssues: number;
+  deliveredStoryPoints: number;
+  estimatorDeliveredPoints: number;
+  ownerDeliveredPoints: number;
+  leadTimes: number[];
+  activeTimes: number[];
+};
+
 function toDate(value?: string | null) {
   return value ? new Date(value) : null;
 }
@@ -531,12 +543,90 @@ async function persistIssue(
   });
 }
 
-export async function rebuildAnalyticsFacts() {
-  const teamMembers = await prisma.teamMember.findMany({
-    where: { active: true },
-    orderBy: { displayName: "asc" }
-  });
-  const sprints = await prisma.sprint.findMany({
+function buildMemberMapForIssues(relevantIssues: Array<{
+  finalAssigneeId: string | null;
+  finalAssigneeName: string | null;
+  finalDoneAt: Date | null;
+  finalAbandonedAt: Date | null;
+  leadExecutionMinutes: number | null;
+  activeWorkMinutes: number | null;
+  storyPointsLatest: number | null;
+  originalAssigneeId: string | null;
+  originalAssigneeName: string | null;
+  finalEstimatorId: string | null;
+  finalEstimatorName: string | null;
+}>) {
+  const memberMap = new Map<string, MemberAccumulator>();
+
+  const ensureMember = (accountId: string, displayName: string) => {
+    const existing = memberMap.get(accountId);
+    if (existing) {
+      return existing;
+    }
+
+    const mapped = applyTeamMemberOverride(accountId, displayName, true);
+    const created: MemberAccumulator = {
+      displayName: mapped.displayName,
+      completedIssues: 0,
+      notCompletedIssues: 0,
+      abandonedIssues: 0,
+      deliveredStoryPoints: 0,
+      estimatorDeliveredPoints: 0,
+      ownerDeliveredPoints: 0,
+      leadTimes: [],
+      activeTimes: []
+    };
+
+    memberMap.set(accountId, created);
+    return created;
+  };
+
+  for (const issue of relevantIssues) {
+    if (issue.finalAssigneeId && issue.finalAssigneeName) {
+      const member = ensureMember(issue.finalAssigneeId, issue.finalAssigneeName);
+
+      if (issue.finalDoneAt) {
+        member.completedIssues += 1;
+        member.deliveredStoryPoints += issue.storyPointsLatest ?? 0;
+        member.ownerDeliveredPoints += issue.storyPointsLatest ?? 0;
+      }
+
+      if (issue.finalAbandonedAt) {
+        member.abandonedIssues += 1;
+      }
+
+      if (issue.leadExecutionMinutes != null) {
+        member.leadTimes.push(issue.leadExecutionMinutes);
+      }
+
+      if (issue.activeWorkMinutes != null) {
+        member.activeTimes.push(issue.activeWorkMinutes);
+      }
+    }
+
+    if (
+      issue.originalAssigneeId &&
+      issue.originalAssigneeName &&
+      issue.originalAssigneeId !== issue.finalAssigneeId
+    ) {
+      const member = ensureMember(issue.originalAssigneeId, issue.originalAssigneeName);
+      member.notCompletedIssues += 1;
+    }
+
+    if (issue.finalEstimatorId && issue.finalEstimatorName && issue.finalDoneAt) {
+      const member = ensureMember(issue.finalEstimatorId, issue.finalEstimatorName);
+      member.estimatorDeliveredPoints += issue.storyPointsLatest ?? 0;
+    }
+  }
+
+  return memberMap;
+}
+
+async function rebuildSprintAnalyticsFact(
+  sprintId: string,
+  teamMembers?: Array<{ accountId: string; displayName: string }>
+) {
+  const sprint = await prisma.sprint.findUnique({
     include: {
       issueLinks: {
         include: {
@@ -544,143 +634,101 @@ export async function rebuildAnalyticsFacts() {
         }
       },
       memberCapacities: true
+    },
+    where: { id: sprintId }
+  });
+
+  if (!sprint) {
+    return false;
+  }
+
+  const activeTeamMembers =
+    teamMembers ??
+    (await prisma.teamMember.findMany({
+      where: { active: true },
+      orderBy: { displayName: "asc" }
+    }));
+  const relevantIssues = sprint.issueLinks
+    .filter((link) => link.isLastSprint)
+    .map((link) => link.issue);
+  const memberMap = buildMemberMapForIssues(relevantIssues);
+
+  await prisma.teamSprintFact.deleteMany({
+    where: { sprintId: sprint.id }
+  });
+  await prisma.memberSprintFact.deleteMany({
+    where: { sprintId: sprint.id }
+  });
+
+  await prisma.teamSprintFact.create({
+    data: {
+      sprintId: sprint.id,
+      committedIssues: relevantIssues.length,
+      deliveredIssues: relevantIssues.filter((issue) => issue.finalDoneAt != null).length,
+      abandonedIssues: relevantIssues.filter((issue) => issue.finalAbandonedAt != null).length,
+      committedStoryPoints: relevantIssues.reduce(
+        (sum, issue) => sum + (issue.storyPointsLatest ?? 0),
+        0
+      ),
+      deliveredStoryPoints: relevantIssues
+        .filter((issue) => issue.finalDoneAt != null)
+        .reduce((sum, issue) => sum + (issue.storyPointsLatest ?? 0), 0),
+      avgLeadExecutionMinutes: average(
+        relevantIssues
+          .map((issue) => issue.leadExecutionMinutes)
+          .filter((value): value is number => value != null)
+      ),
+      avgActiveWorkMinutes: average(
+        relevantIssues
+          .map((issue) => issue.activeWorkMinutes)
+          .filter((value): value is number => value != null)
+      ),
+      handoffIssues: relevantIssues.filter((issue) => issue.handoffDetected).length
     }
   });
 
-  await prisma.teamSprintFact.deleteMany();
-  await prisma.memberSprintFact.deleteMany();
-
-  for (const sprint of sprints) {
-    const relevantIssues = sprint.issueLinks
-      .filter((link) => link.isLastSprint)
-      .map((link) => link.issue);
-
-    await prisma.teamSprintFact.create({
-      data: {
-        sprintId: sprint.id,
-        committedIssues: relevantIssues.length,
-        deliveredIssues: relevantIssues.filter((issue) => issue.finalDoneAt != null).length,
-        abandonedIssues: relevantIssues.filter((issue) => issue.finalAbandonedAt != null).length,
-        committedStoryPoints: relevantIssues.reduce(
-          (sum, issue) => sum + (issue.storyPointsLatest ?? 0),
-          0
-        ),
-        deliveredStoryPoints: relevantIssues
-          .filter((issue) => issue.finalDoneAt != null)
-          .reduce((sum, issue) => sum + (issue.storyPointsLatest ?? 0), 0),
-        avgLeadExecutionMinutes: average(
-          relevantIssues
-            .map((issue) => issue.leadExecutionMinutes)
-            .filter((value): value is number => value != null)
-        ),
-        avgActiveWorkMinutes: average(
-          relevantIssues
-            .map((issue) => issue.activeWorkMinutes)
-            .filter((value): value is number => value != null)
-        ),
-        handoffIssues: relevantIssues.filter((issue) => issue.handoffDetected).length
-      }
-    });
-
-    const memberMap = new Map<
-      string,
-      {
-        displayName: string;
-        completedIssues: number;
-        notCompletedIssues: number;
-        abandonedIssues: number;
-        deliveredStoryPoints: number;
-        estimatorDeliveredPoints: number;
-        ownerDeliveredPoints: number;
-        leadTimes: number[];
-        activeTimes: number[];
-      }
-    >();
-
-    const ensureMember = (accountId: string, displayName: string) => {
-      const existing = memberMap.get(accountId);
-      if (existing) {
-        return existing;
-      }
-
-      const mapped = applyTeamMemberOverride(accountId, displayName, true);
-      const created = {
-        displayName: mapped.displayName,
-        completedIssues: 0,
-        notCompletedIssues: 0,
-        abandonedIssues: 0,
-        deliveredStoryPoints: 0,
-        estimatorDeliveredPoints: 0,
-        ownerDeliveredPoints: 0,
-        leadTimes: [] as number[],
-        activeTimes: [] as number[]
-      };
-
-      memberMap.set(accountId, created);
-      return created;
-    };
-
-    for (const issue of relevantIssues) {
-      if (issue.finalAssigneeId && issue.finalAssigneeName) {
-        const member = ensureMember(issue.finalAssigneeId, issue.finalAssigneeName);
-
-        if (issue.finalDoneAt) {
-          member.completedIssues += 1;
-          member.deliveredStoryPoints += issue.storyPointsLatest ?? 0;
-          member.ownerDeliveredPoints += issue.storyPointsLatest ?? 0;
-        }
-
-        if (issue.finalAbandonedAt) {
-          member.abandonedIssues += 1;
-        }
-
-        if (issue.leadExecutionMinutes != null) {
-          member.leadTimes.push(issue.leadExecutionMinutes);
-        }
-
-        if (issue.activeWorkMinutes != null) {
-          member.activeTimes.push(issue.activeWorkMinutes);
-        }
-      }
-
-      if (
-        issue.originalAssigneeId &&
-        issue.originalAssigneeName &&
-        issue.originalAssigneeId !== issue.finalAssigneeId
-      ) {
-        const member = ensureMember(issue.originalAssigneeId, issue.originalAssigneeName);
-        member.notCompletedIssues += 1;
-      }
-
-      if (issue.finalEstimatorId && issue.finalEstimatorName && issue.finalDoneAt) {
-        const member = ensureMember(issue.finalEstimatorId, issue.finalEstimatorName);
-        member.estimatorDeliveredPoints += issue.storyPointsLatest ?? 0;
-      }
-    }
-
-    for (const teamMember of teamMembers) {
+  await prisma.memberSprintFact.createMany({
+    data: activeTeamMembers.map((teamMember) => {
       const fact = memberMap.get(teamMember.accountId);
       const capacity = sprint.memberCapacities.find(
         (item) => item.accountId === teamMember.accountId
       );
-      await prisma.memberSprintFact.create({
-        data: {
-          sprintId: sprint.id,
-          accountId: teamMember.accountId,
-          displayName: teamMember.displayName,
-          completedIssues: fact?.completedIssues ?? 0,
-          notCompletedIssues: fact?.notCompletedIssues ?? 0,
-          abandonedIssues: fact?.abandonedIssues ?? 0,
-          deliveredStoryPoints: fact?.deliveredStoryPoints ?? 0,
-          avgLeadExecutionMinutes: average(fact?.leadTimes ?? []),
-          avgActiveWorkMinutes: average(fact?.activeTimes ?? []),
-          capacityDays: capacity?.capacityDays ?? null,
-          personalDaysOff: capacity?.personalDaysOff ?? null,
-          estimatorDeliveredPoints: fact?.estimatorDeliveredPoints ?? 0,
-          ownerDeliveredPoints: fact?.ownerDeliveredPoints ?? 0
-        }
-      });
-    }
+
+      return {
+        sprintId: sprint.id,
+        accountId: teamMember.accountId,
+        displayName: teamMember.displayName,
+        completedIssues: fact?.completedIssues ?? 0,
+        notCompletedIssues: fact?.notCompletedIssues ?? 0,
+        abandonedIssues: fact?.abandonedIssues ?? 0,
+        deliveredStoryPoints: fact?.deliveredStoryPoints ?? 0,
+        avgLeadExecutionMinutes: average(fact?.leadTimes ?? []),
+        avgActiveWorkMinutes: average(fact?.activeTimes ?? []),
+        capacityDays: capacity?.capacityDays ?? null,
+        personalDaysOff: capacity?.personalDaysOff ?? null,
+        estimatorDeliveredPoints: fact?.estimatorDeliveredPoints ?? 0,
+        ownerDeliveredPoints: fact?.ownerDeliveredPoints ?? 0
+      };
+    })
+  });
+
+  return true;
+}
+
+export async function rebuildAnalyticsFacts() {
+  const [teamMembers, sprints] = await Promise.all([
+    prisma.teamMember.findMany({
+      where: { active: true },
+      orderBy: { displayName: "asc" }
+    }),
+    prisma.sprint.findMany({
+      select: { id: true },
+      orderBy: { startedAt: "asc" }
+    })
+  ]);
+
+  for (const sprint of sprints) {
+    await rebuildSprintAnalyticsFact(sprint.id, teamMembers);
   }
 }
 
