@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SprintSwitcher } from "@/components/sprint-switcher";
 import { StatCard } from "@/components/stat-card";
+import { CapacityBulkInputs } from "@/components/capacity-bulk-inputs";
 import { getCapacitySnapshot } from "@/lib/capacity";
 import { saveCapacityAction } from "@/app/capacity/actions";
 import { isCurrentUserAdmin } from "@/lib/access";
@@ -148,28 +149,11 @@ export default async function CapacityPage({
           <input type="hidden" name="sprintId" value={selectedSprint.id} />
 
           <div className="capacity-settings-grid">
-            <label>
-              Sprint work days
-              <input
-                name="sprintWorkDays"
-                type="number"
-                min="0"
-                step="0.5"
-                defaultValue={summary.sprintWorkDays}
-                disabled={!isAdmin}
-              />
-            </label>
-            <label>
-              Global days off
-              <input
-                name="globalDaysOff"
-                type="number"
-                min="0"
-                step="0.5"
-                defaultValue={summary.globalDaysOff}
-                disabled={!isAdmin}
-              />
-            </label>
+            <CapacityBulkInputs
+              sprintWorkDays={summary.sprintWorkDays}
+              globalDaysOff={summary.globalDaysOff}
+              disabled={!isAdmin}
+            />
             <label className="notes-field">
               Sprint notes
               <input
@@ -215,6 +199,7 @@ export default async function CapacityPage({
                         type="number"
                         min="0"
                         step="0.5"
+                        data-member-capacity-input="true"
                         defaultValue={member.capacityDays}
                         disabled={!isAdmin}
                       />

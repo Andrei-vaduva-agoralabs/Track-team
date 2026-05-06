@@ -1,9 +1,9 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { rebuildAnalyticsFacts } from "@/lib/jira/sync";
 import { requireAdmin } from "@/lib/access";
 
 function parseNumericInput(value: FormDataEntryValue | null, fallback = 0) {
@@ -34,48 +34,54 @@ export async function saveCapacityAction(formData: FormData) {
     orderBy: { displayName: "asc" }
   });
 
-  await prisma.sprintSettings.upsert({
-    where: { sprintId },
-    update: {
-      sprintWorkDays,
-      globalDaysOff,
-      notes
-    },
-    create: {
-      sprintId,
-      sprintWorkDays,
-      globalDaysOff,
-      notes
-    }
-  });
+  const capacityRows = teamMembers.map((member) => ({
+    sprintId,
+    accountId: member.accountId,
+    displayName: member.displayName,
+    capacityDays: parseNumericInput(formData.get(`capacity:${member.accountId}`)),
+    personalDaysOff: parseNumericInput(formData.get(`daysOff:${member.accountId}`)),
+    isManualOverride: true
+  }));
 
-  for (const member of teamMembers) {
-    const capacityDays = parseNumericInput(formData.get(`capacity:${member.accountId}`));
-    const personalDaysOff = parseNumericInput(formData.get(`daysOff:${member.accountId}`));
+  const factCapacityUpdate =
+    capacityRows.length > 0
+      ? prisma.$executeRaw`
+          UPDATE "MemberSprintFact" AS fact
+          SET
+            "capacityDays" = capacity."capacityDays",
+            "personalDaysOff" = capacity."personalDaysOff",
+            "updatedAt" = NOW()
+          FROM (
+            VALUES ${Prisma.join(
+              capacityRows.map((row) =>
+                Prisma.sql`(${row.accountId}, ${row.capacityDays}, ${row.personalDaysOff})`
+              )
+            )}
+          ) AS capacity("accountId", "capacityDays", "personalDaysOff")
+          WHERE fact."sprintId" = ${sprintId}
+            AND fact."accountId" = capacity."accountId"
+        `
+      : null;
 
-    await prisma.sprintMemberCapacity.upsert({
-      where: {
-        sprintId_accountId: {
-          sprintId,
-          accountId: member.accountId
-        }
-      },
+  await prisma.$transaction([
+    prisma.sprintSettings.upsert({
+      where: { sprintId },
       update: {
-        displayName: member.displayName,
-        capacityDays,
-        personalDaysOff,
-        isManualOverride: true
+        sprintWorkDays,
+        globalDaysOff,
+        notes
       },
       create: {
         sprintId,
-        accountId: member.accountId,
-        displayName: member.displayName,
-        capacityDays,
-        personalDaysOff,
-        isManualOverride: true
+        sprintWorkDays,
+        globalDaysOff,
+        notes
       }
-    });
-  }
+    }),
+    prisma.sprintMemberCapacity.deleteMany({ where: { sprintId } }),
+    prisma.sprintMemberCapacity.createMany({ data: capacityRows }),
+    ...(factCapacityUpdate ? [factCapacityUpdate] : [])
+  ]);
 
   await prisma.sprintMemberCapacity.deleteMany({
     where: {
@@ -85,8 +91,6 @@ export async function saveCapacityAction(formData: FormData) {
       }
     }
   });
-
-  await rebuildAnalyticsFacts();
 
   revalidatePath("/capacity");
   revalidatePath("/dashboard");
