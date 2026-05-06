@@ -186,7 +186,7 @@ export async function getDashboardSnapshot(selectedSprintId?: string) {
       ? sprints.slice(currentSprintIndex, currentSprintIndex + 3)
       : sprints.slice(0, 3);
 
-  const [selectedTeamFact, selectedMemberFacts] = selectedSprint
+  const [selectedTeamFact, selectedMemberFacts, selectedIssueLinks] = selectedSprint
     ? await Promise.all([
         prisma.teamSprintFact.findUnique({
           where: { sprintId: selectedSprint.id }
@@ -194,12 +194,48 @@ export async function getDashboardSnapshot(selectedSprintId?: string) {
         prisma.memberSprintFact.findMany({
           where: { sprintId: selectedSprint.id },
           orderBy: [{ deliveredStoryPoints: "desc" }, { displayName: "asc" }]
+        }),
+        prisma.jiraIssueSprint.findMany({
+          where: {
+            sprintId: selectedSprint.id,
+            isLastSprint: true
+          },
+          include: {
+            issue: true
+          }
         })
       ])
-    : [null, []];
+    : [null, [], []];
+
+  const assignmentMap = new Map<
+    string,
+    {
+      assignedIssues: number;
+      assignedStoryPoints: number;
+    }
+  >();
+
+  for (const link of selectedIssueLinks) {
+    const accountId = link.issue.finalAssigneeId;
+
+    if (!accountId) {
+      continue;
+    }
+
+    const assignment = assignmentMap.get(accountId) ?? {
+      assignedIssues: 0,
+      assignedStoryPoints: 0
+    };
+
+    assignment.assignedIssues += 1;
+    assignment.assignedStoryPoints += link.issue.storyPointsLatest ?? 0;
+    assignmentMap.set(accountId, assignment);
+  }
 
   const mappedMemberFacts = selectedMemberFacts.map((fact) => ({
     ...fact,
+    assignedIssues: assignmentMap.get(fact.accountId)?.assignedIssues ?? 0,
+    assignedStoryPoints: assignmentMap.get(fact.accountId)?.assignedStoryPoints ?? 0,
     displayName: normalizeDisplayName(fact.displayName),
     sprintName: sprintMap.get(fact.sprintId) ?? fact.sprintId,
     avgLeadExecutionLabel: minutesToLabel(fact.avgLeadExecutionMinutes),

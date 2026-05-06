@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { hasJiraCredentials } from "@/lib/jira/config";
 import { JiraApiError } from "@/lib/jira/client";
-import { importIssuesFromJira } from "@/lib/jira/sync";
+import { importIssuesFromJira, refreshSprintFromJira } from "@/lib/jira/sync";
 import { requireAdmin } from "@/lib/access";
 
 type SyncState = {
@@ -11,7 +11,10 @@ type SyncState = {
   message: string;
 };
 
-export async function refreshBoardAction(_previousState: SyncState): Promise<SyncState> {
+export async function refreshBoardAction(
+  _previousState: SyncState,
+  formData: FormData
+): Promise<SyncState> {
   await requireAdmin();
 
   if (!hasJiraCredentials()) {
@@ -22,7 +25,11 @@ export async function refreshBoardAction(_previousState: SyncState): Promise<Syn
   }
 
   try {
-    const result = await importIssuesFromJira();
+    const sprintIdEntry = formData.get("sprintId");
+    const sprintId = typeof sprintIdEntry === "string" ? sprintIdEntry : undefined;
+    const result = sprintId
+      ? await refreshSprintFromJira(sprintId)
+      : await importIssuesFromJira();
 
     revalidatePath("/dashboard");
     revalidatePath("/capacity");
@@ -30,7 +37,7 @@ export async function refreshBoardAction(_previousState: SyncState): Promise<Syn
 
     return {
       status: "success",
-      message: `Synced ${result.importedIssues} stories and bugs across ${result.sprintCount} sprints.`
+      message: `Synced ${result.importedIssues} stories and bugs across ${result.sprintCount} sprint${result.sprintCount === 1 ? "" : "s"}.`
     };
   } catch (error) {
     if (error instanceof JiraApiError) {

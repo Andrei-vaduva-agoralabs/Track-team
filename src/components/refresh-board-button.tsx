@@ -29,12 +29,13 @@ function RefreshIcon() {
   );
 }
 
-export function RefreshBoardButton() {
+export function RefreshBoardButton({ sprintId }: { sprintId?: string }) {
   const [state, action, pending] = useActionState(refreshBoardAction, initialState);
 
   return (
     <div className="sync-control">
       <form action={action}>
+        <input type="hidden" name="sprintId" value={sprintId ?? ""} />
         <button className="secondary-action" type="submit" disabled={pending}>
           <RefreshIcon />
           <span>{pending ? "Syncing..." : "Refresh board"}</span>
