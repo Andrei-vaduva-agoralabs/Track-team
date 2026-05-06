@@ -872,9 +872,99 @@ tbody tr:hover {
   font-size: 0.88rem;
 }
 
+.shell-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .shell-footer a {
   color: var(--ink);
   font-weight: 800;
+}
+
+.wiki-tabs {
+  display: grid;
+  gap: 22px;
+}
+
+.wiki-tab-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.wiki-tab-button {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.wiki-tab-button span {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.wiki-tab-button small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.wiki-tab-button.active {
+  border-color: rgba(15, 118, 110, 0.28);
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.1), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
+}
+
+.wiki-panel,
+.wiki-section {
+  display: grid;
+  gap: 16px;
+}
+
+.wiki-section-header h2,
+.wiki-card-header h3 {
+  margin: 0;
+}
+
+.wiki-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.wiki-card {
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  gap: 12px;
+}
+
+.wiki-card p,
+.wiki-note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.wiki-card-header {
+  display: grid;
+  gap: 8px;
+}
+
+.wiki-inline-pills,
+.wiki-link-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .password-card {
@@ -934,7 +1024,8 @@ code {
   }
 
   .shell-header,
-  .panel-header-inline {
+  .panel-header-inline,
+  .shell-footer {
     flex-direction: column;
     align-items: flex-start;
   }
