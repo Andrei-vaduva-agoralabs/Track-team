@@ -1,27 +1,13 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { requestLoginCode, verifyLoginCode } from "@/lib/email-code-auth";
+import { signInWithPassword } from "@/lib/email-code-auth";
 
-export async function requestCodeAction(formData: FormData) {
+export async function signInAction(formData: FormData) {
   const email = String(formData.get("email") ?? "");
+  const password = String(formData.get("password") ?? "");
   const callbackUrl = String(formData.get("callbackUrl") ?? "/dashboard");
-  const result = await requestLoginCode(email);
-  const params = new URLSearchParams({
-    email,
-    callbackUrl,
-    message: result.message,
-    step: result.ok ? "code" : "email"
-  });
-
-  redirect(`/signin?${params.toString()}`);
-}
-
-export async function verifyCodeAction(formData: FormData) {
-  const email = String(formData.get("email") ?? "");
-  const code = String(formData.get("code") ?? "");
-  const callbackUrl = String(formData.get("callbackUrl") ?? "/dashboard");
-  const result = await verifyLoginCode(email, code);
+  const result = await signInWithPassword(email, password);
 
   if (result.ok) {
     redirect(callbackUrl);
@@ -30,8 +16,7 @@ export async function verifyCodeAction(formData: FormData) {
   const params = new URLSearchParams({
     email,
     callbackUrl,
-    message: result.message,
-    step: "code"
+    message: result.message
   });
 
   redirect(`/signin?${params.toString()}`);

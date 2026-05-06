@@ -1,26 +1,49 @@
 import "server-only";
 
-import { randomInt } from "crypto";
+import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import {
   createSessionToken,
-  safeCompare,
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
-  signValue,
   verifySessionToken
 } from "@/lib/session-cookie";
 
-const CODE_TTL_MINUTES = 10;
 const ADMIN_EMAIL = "andrei.vaduva@agoralabs.tech";
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
-function hashCode(email: string, code: string) {
-  return signValue(`${normalizeEmail(email)}:${code}`);
+function hashPassword(password: string, salt = randomBytes(16).toString("hex")) {
+  const digest = scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${digest}`;
+}
+
+function verifyPasswordHash(password: string, passwordHash: string) {
+  const [salt, storedDigest] = passwordHash.split(":");
+
+  if (!salt || !storedDigest) {
+    return false;
+  }
+
+  const digest = scryptSync(password, salt, 64).toString("hex");
+  const digestBuffer = Buffer.from(digest, "hex");
+  const storedBuffer = Buffer.from(storedDigest, "hex");
+
+  if (digestBuffer.length !== storedBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(digestBuffer, storedBuffer);
+}
+
+export function generatePassword(length = 16) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const bytes = randomBytes(length);
+
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
 export async function getEmailSession() {
@@ -93,134 +116,58 @@ export async function ensureAdminUser() {
   });
 }
 
-async function sendLoginEmail(email: string, code: string) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.AUTH_EMAIL_FROM ?? "Agora Team Analytics <onboarding@resend.dev>";
-
-  if (!apiKey) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("Email delivery is not configured.");
-    }
-
-    console.log(`[TrackTeam login code] ${email}: ${code}`);
-    return false;
-  }
-
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      from,
-      to: email,
-      subject: "Your Agora Team Analytics login code",
-      text: `Your login code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Could not send login code: ${await response.text()}`);
-  }
-
-  return true;
-}
-
-export async function requestLoginCode(email: string) {
+export async function setGeneratedPasswordForUser({
+  email,
+  role,
+  active = true
+}: {
+  email: string;
+  role: "admin" | "viewer";
+  active?: boolean;
+}) {
   const normalizedEmail = normalizeEmail(email);
+  const password = generatePassword();
+  const passwordHash = hashPassword(password);
 
   await ensureAdminUser();
 
-  const user = await prisma.authUser.findUnique({ where: { email: normalizedEmail } });
-
-  if (!user?.active) {
-    return { ok: false, message: "This email is not allowed. Ask an admin for access." };
-  }
-
-  await prisma.loginCode.updateMany({
-    where: {
-      email: normalizedEmail,
-      consumedAt: null
+  await prisma.authUser.upsert({
+    where: { email: normalizedEmail },
+    update: {
+      role,
+      active,
+      passwordHash,
+      passwordUpdatedAt: new Date()
     },
-    data: {
-      consumedAt: new Date()
-    }
-  });
-
-  const code = String(randomInt(100000, 999999));
-
-  const loginCode = await prisma.loginCode.create({
-    data: {
+    create: {
       email: normalizedEmail,
-      codeHash: hashCode(normalizedEmail, code),
-      expiresAt: new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000)
+      role,
+      active,
+      passwordHash,
+      passwordUpdatedAt: new Date()
     }
   });
 
-  try {
-    const delivered = await sendLoginEmail(normalizedEmail, code);
-
-    return {
-      ok: true,
-      message: delivered
-        ? "We sent a 6-digit code to your email."
-        : "Email delivery is not configured locally. Your code was written to the server logs."
-    };
-  } catch {
-    await prisma.loginCode.update({
-      where: { id: loginCode.id },
-      data: { consumedAt: new Date() }
-    });
-
-    return {
-      ok: false,
-      message: "Could not send the login code. Ask an admin to configure email delivery."
-    };
-  }
+  return password;
 }
 
-export async function verifyLoginCode(email: string, code: string) {
+export async function signInWithPassword(email: string, password: string) {
   const normalizedEmail = normalizeEmail(email);
-  const normalizedCode = code.trim();
 
-  const loginCode = await prisma.loginCode.findFirst({
-    where: {
-      email: normalizedEmail,
-      consumedAt: null,
-      expiresAt: {
-        gt: new Date()
-      }
-    },
-    orderBy: { createdAt: "desc" }
-  });
-
-  if (!loginCode) {
-    return { ok: false, message: "Code expired. Request a new code." };
+  if (!normalizedEmail || !password) {
+    return { ok: false, message: "Enter both email and password." };
   }
 
-  if (loginCode.attempts >= 5) {
-    return { ok: false, message: "Too many attempts. Request a new code." };
+  await ensureAdminUser();
+  const user = await prisma.authUser.findUnique({ where: { email: normalizedEmail } });
+
+  if (!user?.active || !user.passwordHash || !verifyPasswordHash(password, user.passwordHash)) {
+    return { ok: false, message: "Invalid email or password." };
   }
 
-  const matches = safeCompare(loginCode.codeHash, hashCode(normalizedEmail, normalizedCode));
-
-  if (!matches) {
-    await prisma.loginCode.update({
-      where: { id: loginCode.id },
-      data: { attempts: { increment: 1 } }
-    });
-
-    return { ok: false, message: "Invalid code. Try again or request a new code." };
-  }
-
-  await prisma.loginCode.update({
-    where: { id: loginCode.id },
-    data: { consumedAt: new Date() }
-  });
   await createSession(normalizedEmail);
 
   return { ok: true, message: "Signed in." };
 }
 
-export { SESSION_COOKIE };
+export { SESSION_COOKIE, normalizeEmail };
