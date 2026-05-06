@@ -45,8 +45,9 @@ export async function Header() {
           </Link>
         ))}
         {isAdmin ? (
-          <Link className="icon-link" href="/setup" aria-label="Open setup">
+          <Link className="settings-link" href="/setup" aria-label="Open setup">
             <GearIcon />
+            <span>Settings</span>
           </Link>
         ) : null}
         {session?.user ? (
