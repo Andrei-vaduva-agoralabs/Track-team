@@ -218,13 +218,20 @@ export async function getDashboardSnapshot(selectedSprintId?: string) {
       assignedStoryPoints: number;
     }
   >();
+  const sprintParticipantIds = new Set<string>();
 
   for (const link of selectedIssueLinks) {
+    if (link.issue.originalAssigneeId) {
+      sprintParticipantIds.add(link.issue.originalAssigneeId);
+    }
+
     const accountId = link.issue.finalAssigneeId;
 
     if (!accountId) {
       continue;
     }
+
+    sprintParticipantIds.add(accountId);
 
     const assignment = assignmentMap.get(accountId) ?? {
       assignedIssues: 0,
@@ -236,15 +243,17 @@ export async function getDashboardSnapshot(selectedSprintId?: string) {
     assignmentMap.set(accountId, assignment);
   }
 
-  const mappedMemberFacts = selectedMemberFacts.map((fact) => ({
-    ...fact,
-    assignedIssues: assignmentMap.get(fact.accountId)?.assignedIssues ?? 0,
-    assignedStoryPoints: assignmentMap.get(fact.accountId)?.assignedStoryPoints ?? 0,
-    displayName: normalizeDisplayName(fact.displayName),
-    sprintName: sprintMap.get(fact.sprintId) ?? fact.sprintId,
-    avgLeadExecutionLabel: minutesToLabel(fact.avgLeadExecutionMinutes),
-    avgActiveWorkLabel: minutesToLabel(fact.avgActiveWorkMinutes)
-  }));
+  const mappedMemberFacts = selectedMemberFacts
+    .filter((fact) => sprintParticipantIds.has(fact.accountId))
+    .map((fact) => ({
+      ...fact,
+      assignedIssues: assignmentMap.get(fact.accountId)?.assignedIssues ?? 0,
+      assignedStoryPoints: assignmentMap.get(fact.accountId)?.assignedStoryPoints ?? 0,
+      displayName: normalizeDisplayName(fact.displayName),
+      sprintName: sprintMap.get(fact.sprintId) ?? fact.sprintId,
+      avgLeadExecutionLabel: minutesToLabel(fact.avgLeadExecutionMinutes),
+      avgActiveWorkLabel: minutesToLabel(fact.avgActiveWorkMinutes)
+    }));
 
   const trendFacts = trendSprints
     .map((sprint) => {
@@ -280,7 +289,7 @@ export async function getDashboardSnapshot(selectedSprintId?: string) {
     config,
     issueCount,
     sprintCount,
-    teamCount,
+    teamCount: selectedSprint ? mappedMemberFacts.length : teamCount,
     latestSuccessfulSync,
     currentSprint,
     selectedSprint,

@@ -29,8 +29,40 @@ export async function saveCapacityAction(formData: FormData) {
   const notesEntry = formData.get("notes");
   const notes = typeof notesEntry === "string" && notesEntry.trim() ? notesEntry.trim() : null;
 
+  const sprintIssueLinks = await prisma.jiraIssueSprint.findMany({
+    where: {
+      sprintId,
+      isLastSprint: true
+    },
+    include: {
+      issue: {
+        select: {
+          originalAssigneeId: true,
+          finalAssigneeId: true
+        }
+      }
+    }
+  });
+
+  const sprintParticipantIds = new Set<string>();
+
+  for (const link of sprintIssueLinks) {
+    if (link.issue.originalAssigneeId) {
+      sprintParticipantIds.add(link.issue.originalAssigneeId);
+    }
+
+    if (link.issue.finalAssigneeId) {
+      sprintParticipantIds.add(link.issue.finalAssigneeId);
+    }
+  }
+
   const teamMembers = await prisma.teamMember.findMany({
-    where: { active: true },
+    where: {
+      active: true,
+      accountId: {
+        in: Array.from(sprintParticipantIds)
+      }
+    },
     orderBy: { displayName: "asc" }
   });
 
@@ -82,6 +114,10 @@ export async function saveCapacityAction(formData: FormData) {
     prisma.sprintMemberCapacity.createMany({ data: capacityRows }),
     ...(factCapacityUpdate ? [factCapacityUpdate] : [])
   ]);
+
+  if (capacityRows.length === 0) {
+    await prisma.sprintMemberCapacity.deleteMany({ where: { sprintId } });
+  }
 
   await prisma.sprintMemberCapacity.deleteMany({
     where: {

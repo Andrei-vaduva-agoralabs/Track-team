@@ -98,6 +98,7 @@ export async function getCapacitySnapshot(selectedSprintId?: string) {
   const defaultCapacityDays = Math.max(sprintWorkDays - globalDaysOff, 0);
 
   const issues = selectedSprint.issueLinks.map((link) => link.issue);
+  const sprintParticipantIds = new Set<string>();
   const assignmentMap = new Map<
     string,
     {
@@ -114,6 +115,10 @@ export async function getCapacitySnapshot(selectedSprintId?: string) {
   let splitRequiredIssues = 0;
 
   for (const issue of issues) {
+    if (issue.originalAssigneeId) {
+      sprintParticipantIds.add(issue.originalAssigneeId);
+    }
+
     const storyPoints = issue.storyPointsLatest ?? 0;
 
     if (storyPoints > 13) {
@@ -125,6 +130,8 @@ export async function getCapacitySnapshot(selectedSprintId?: string) {
       unassignedStoryPoints += storyPoints;
       continue;
     }
+
+    sprintParticipantIds.add(issue.finalAssigneeId);
 
     const entry = assignmentMap.get(issue.finalAssigneeId) ?? {
       assignedIssues: 0,
@@ -152,6 +159,7 @@ export async function getCapacitySnapshot(selectedSprintId?: string) {
   }
 
   const members = teamMembers
+    .filter((member) => sprintParticipantIds.has(member.accountId))
     .map((member) => {
       const capacity = selectedSprint.memberCapacities.find(
         (item) => item.accountId === member.accountId
