@@ -206,10 +206,10 @@ export default async function DashboardPage({
                 </tr>
               ) : (
                 snapshot.memberFacts.map((fact) => {
-                  const involvedIssues = fact.completedIssues + fact.notCompletedIssues;
+                  const assignedIssues = fact.assignedIssues;
                   const completionRatio =
-                    involvedIssues > 0
-                      ? Math.round((fact.completedIssues / involvedIssues) * 100)
+                    assignedIssues > 0
+                      ? Math.round((fact.completedIssues / assignedIssues) * 100)
                       : 0;
 
                   return (
@@ -230,7 +230,7 @@ export default async function DashboardPage({
                       </td>
                       <td>
                         <div className="metric-stack">
-                          <strong>{fact.completedIssues}/{involvedIssues || 0}</strong>
+                          <strong>{fact.completedIssues}/{assignedIssues}</strong>
                           <div className="mini-track">
                             <span style={{ width: `${completionRatio}%` }} />
                           </div>
