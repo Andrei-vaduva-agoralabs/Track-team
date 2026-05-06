@@ -1,38 +1,44 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { isAuthEnabled } from "@/lib/auth-config";
+import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/session-cookie";
 
-const PUBLIC_PATHS = ["/signin"];
+const PUBLIC_PATHS = ["/signin", "/api/auth"];
 
-export default auth((request) => {
-  const { pathname } = request.nextUrl;
+export function middleware(request: NextRequest) {
+  const { pathname, search } = request.nextUrl;
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-current-pathname", pathname);
+  requestHeaders.set("x-current-path", `${pathname}${search}`);
 
-  if (!isAuthEnabled()) {
-    return NextResponse.next();
-  }
-
-  const isPublic =
-    PUBLIC_PATHS.includes(pathname) ||
-    pathname.startsWith("/api/auth") ||
+  if (
+    PUBLIC_PATHS.some((path) => pathname.startsWith(path)) ||
     pathname.startsWith("/_next") ||
-    pathname === "/favicon.ico";
-
-  if (isPublic) {
-    return NextResponse.next();
+    pathname === "/favicon.ico"
+  ) {
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders
+      }
+    });
   }
 
-  if (!request.auth) {
-    const signInUrl = new URL("/signin", request.nextUrl);
-    signInUrl.searchParams.set("callbackUrl", request.nextUrl.href);
+  const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+
+  if (!session) {
+    const signInUrl = new URL("/signin", request.url);
+    signInUrl.searchParams.set("callbackUrl", `${pathname}${search}`);
     return NextResponse.redirect(signInUrl);
   }
 
-  if (pathname.startsWith("/setup") && request.auth.user.role !== "admin") {
-    return NextResponse.redirect(new URL("/dashboard", request.nextUrl));
+  if ((pathname.startsWith("/setup") || pathname.startsWith("/backoffice")) && session.user.role !== "admin") {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  return NextResponse.next();
-});
+  return NextResponse.next({
+    request: {
+      headers: requestHeaders
+    }
+  });
+}
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"]

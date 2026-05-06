@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { auth, signOut } from "@/auth";
-import { isAuthEnabled } from "@/lib/auth-config";
+import { clearSession, getEmailSession } from "@/lib/email-code-auth";
 
 const items = [
   { href: "/dashboard", label: "Dashboard" },
@@ -27,7 +26,7 @@ function GearIcon() {
 }
 
 export async function Header() {
-  const session = isAuthEnabled() ? await auth() : null;
+  const session = await getEmailSession();
   const isAdmin = session?.user.role === "admin";
 
   return (
@@ -45,7 +44,7 @@ export async function Header() {
             {item.label}
           </Link>
         ))}
-        {isAdmin || !isAuthEnabled() ? (
+        {isAdmin ? (
           <Link className="icon-link" href="/setup" aria-label="Open setup">
             <GearIcon />
           </Link>
@@ -54,7 +53,7 @@ export async function Header() {
           <form
             action={async () => {
               "use server";
-              await signOut({ redirectTo: "/signin" });
+              await clearSession();
             }}
           >
             <button className="nav-button" type="submit">
