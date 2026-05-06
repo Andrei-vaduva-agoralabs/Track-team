@@ -27,12 +27,13 @@ function GearIcon() {
 
 export async function Header() {
   const session = await getEmailSession();
+  const user = session?.user;
 
-  if (!session?.user) {
+  if (!user) {
     return null;
   }
 
-  const isAdmin = session.user.role === "admin";
+  const isAdmin = user.role === "admin";
 
   return (
     <header className="shell-header">

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "@/app/globals.css";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
+import { ShellChrome } from "@/components/shell-chrome";
 
 export const metadata: Metadata = {
   title: "Agora Team Analytics",
@@ -17,11 +18,9 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <div className="shell-bg" />
-        <main className="shell">
-          <Header />
+        <ShellChrome header={<Header />} footer={<Footer />}>
           {children}
-          <Footer />
-        </main>
+        </ShellChrome>
       </body>
     </html>
   );
