@@ -956,12 +956,26 @@ export async function refreshSprintFromJira(
     ]);
 
     const sprintIssues = await fetchSprintIssues(sprint.jiraSprintId, fields);
+    const existingIssueMap = new Map(
+      sprint.issueLinks.map((link) => [link.issue.id, link.issue])
+    );
     const fetchedIssueIds = new Set(sprintIssues.map((issue) => issue.id));
     const staleIssueKeys = sprint.issueLinks
       .filter((link) => !fetchedIssueIds.has(link.issue.id))
       .map((link) => link.issue.key);
+    let changedIssueCount = 0;
+    let skippedIssueCount = 0;
 
     for (const issue of sprintIssues) {
+      const existingIssue = existingIssueMap.get(issue.id);
+      const issueUpdatedAt = new Date(issue.fields.updated).getTime();
+
+      if (existingIssue && existingIssue.updatedAt.getTime() === issueUpdatedAt) {
+        skippedIssueCount += 1;
+        continue;
+      }
+
+      changedIssueCount += 1;
       await persistIssue(
         issue,
         new Set(getSprintIdsFromField(issue, fields.sprintFieldId)),
@@ -976,9 +990,11 @@ export async function refreshSprintFromJira(
         await prisma.jiraIssue.deleteMany({
           where: { key: staleIssueKey }
         });
+        changedIssueCount += 1;
         continue;
       }
 
+      changedIssueCount += 1;
       await persistIssue(
         latestIssue,
         new Set(getSprintIdsFromField(latestIssue, fields.sprintFieldId)),
@@ -986,7 +1002,9 @@ export async function refreshSprintFromJira(
       );
     }
 
-    await rebuildAnalyticsFacts();
+    if (changedIssueCount > 0) {
+      await rebuildSprintAnalyticsFact(sprint.id);
+    }
 
     await prisma.syncRun.update({
       where: { id: run.id },
@@ -995,7 +1013,7 @@ export async function refreshSprintFromJira(
         finishedAt: new Date(),
         issuesFetched: sprintIssues.length,
         sprintsFetched: 1,
-        message: `Refreshed sprint ${sprint.name} with ${sprintIssues.length} live issues and synced ${teamMembers.length} team members`
+        message: `Refreshed sprint ${sprint.name}: ${changedIssueCount} changed, ${skippedIssueCount} unchanged, ${staleIssueKeys.length} stale checks, ${teamMembers.length} team members synced`
       }
     });
 
@@ -1004,7 +1022,9 @@ export async function refreshSprintFromJira(
       scannedSprintIssues: sprintIssues.length,
       sprintCount: 1,
       teamCount: teamMembers.length,
-      staleIssues: staleIssueKeys.length
+      staleIssues: staleIssueKeys.length,
+      changedIssues: changedIssueCount,
+      skippedIssues: skippedIssueCount
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Jira sprint refresh error";
