@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session-cookie";
 
-const PUBLIC_PATHS = ["/signin", "/api/auth"];
+const PUBLIC_PATHS = ["/signin", "/api/auth", "/api/cron", "/api/jira/webhook"];
 
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;

@@ -1,6 +1,5 @@
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { jiraRequest } from "@/lib/jira/client";
+import { JiraApiError, jiraRequest } from "@/lib/jira/client";
 import { getJiraEnv } from "@/lib/jira/config";
 import { applyTeamMemberOverride, normalizeDisplayName } from "@/lib/team-members";
 import type {
@@ -33,47 +32,7 @@ type DerivedIssueMetrics = {
   reopenedCount: number;
 };
 
-type ExistingIssueSnapshot = {
-  currentStatus: string;
-  storyPointsLatest: number | null;
-  originalAssigneeId: string | null;
-  originalAssigneeName: string | null;
-  finalEstimatorId: string | null;
-  finalEstimatorName: string | null;
-  firstInProgressAt: Date | null;
-  finalDoneAt: Date | null;
-  finalAbandonedAt: Date | null;
-  leadExecutionMinutes: number | null;
-  activeWorkMinutes: number | null;
-  reopenedCount: number;
-};
-
-type IssueSnapshotRow = {
-  id: string;
-  jiraIssueId: string;
-  key: string;
-  projectKey: string;
-  issueType: string;
-  summary: string;
-  currentStatus: string;
-  storyPointsLatest: number | null;
-  originalAssigneeId: string | null;
-  originalAssigneeName: string | null;
-  finalAssigneeId: string | null;
-  finalAssigneeName: string | null;
-  finalEstimatorId: string | null;
-  finalEstimatorName: string | null;
-  firstInProgressAt: Date | null;
-  finalDoneAt: Date | null;
-  finalAbandonedAt: Date | null;
-  leadExecutionMinutes: number | null;
-  activeWorkMinutes: number | null;
-  handoffDetected: boolean;
-  reopenedCount: number;
-  createdAt: Date;
-  updatedAt: Date;
-  isLastSprint: boolean;
-};
+type SyncTrigger = "manual" | "cron" | "webhook";
 
 function toDate(value?: string | null) {
   return value ? new Date(value) : null;
@@ -101,13 +60,9 @@ async function getFieldIds() {
   const sprintField = fields.find(
     (field) => field.schema?.custom === "com.pyxis.greenhopper.jira:gh-sprint"
   );
-  const storyPointsField =
-    fields.find(
-      (field) => field.schema?.custom === "com.pyxis.greenhopper.jira:jsw-story-points"
-    ) ??
-    fields.find((field) => field.name.toLowerCase() === "story point estimate") ??
-    fields.find((field) => field.name.toLowerCase() === "story points") ??
-    fields.find((field) => field.name.toLowerCase().includes("story point"));
+  const storyPointsField = fields.find((field) =>
+    field.name.toLowerCase().includes("story point")
+  );
 
   if (!sprintField || !storyPointsField) {
     throw new Error("Could not resolve Jira sprint or story points field ids.");
@@ -159,8 +114,7 @@ async function importTeamMembersFromJira() {
 
 async function fetchSprintIssues(
   sprintId: number,
-  fields: { sprintFieldId: string; storyPointsFieldId: string },
-  options: { includeChangelog?: boolean } = { includeChangelog: true }
+  fields: { sprintFieldId: string; storyPointsFieldId: string }
 ) {
   const issues: JiraIssue[] = [];
   let startAt = 0;
@@ -173,7 +127,7 @@ async function fetchSprintIssues(
         searchParams: {
           startAt,
           maxResults: 50,
-          expand: options.includeChangelog ? "changelog" : undefined,
+          expand: "changelog",
           fields: [
             "summary",
             "status",
@@ -200,6 +154,46 @@ async function fetchSprintIssues(
     (issue) =>
       ISSUE_TYPES.has(issue.fields.issuetype.name) && issue.fields.issuetype.subtask === false
   );
+}
+
+async function fetchIssueByKey(
+  issueKey: string,
+  fields: { sprintFieldId: string; storyPointsFieldId: string }
+) {
+  let issue: JiraIssue;
+
+  try {
+    issue = await jiraRequest<JiraIssue>(`/rest/api/3/issue/${issueKey}`, {
+      searchParams: {
+        expand: "changelog",
+        fields: [
+          "summary",
+          "status",
+          "issuetype",
+          "assignee",
+          "creator",
+          "reporter",
+          "created",
+          "updated",
+          "project",
+          fields.sprintFieldId,
+          fields.storyPointsFieldId
+        ].join(",")
+      }
+    });
+  } catch (error) {
+    if (error instanceof JiraApiError && error.status === 404) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  if (!ISSUE_TYPES.has(issue.fields.issuetype.name) || issue.fields.issuetype.subtask) {
+    return null;
+  }
+
+  return issue;
 }
 
 function getSprintIdsFromField(issue: JiraIssue, sprintFieldId: string) {
@@ -537,191 +531,12 @@ async function persistIssue(
   });
 }
 
-function shouldFetchFullHistory(issue: JiraIssue, existing?: ExistingIssueSnapshot | null) {
-  const currentStatus = issue.fields.status.name;
-
-  if (!existing) {
-    return !["To Do", "Backlog"].includes(currentStatus);
-  }
-
-  if (existing.currentStatus !== currentStatus) {
-    return true;
-  }
-
-  if (IN_PROGRESS_STATUSES.has(currentStatus) && !existing.firstInProgressAt) {
-    return true;
-  }
-
-  if (DONE_STATUSES.has(currentStatus) && !existing.finalDoneAt) {
-    return true;
-  }
-
-  if (ABANDONED_STATUSES.has(currentStatus) && !existing.finalAbandonedAt) {
-    return true;
-  }
-
-  return false;
-}
-
-function buildIssueSnapshotRow(
-  issue: JiraIssue,
-  sprintId: string,
-  fields: { sprintFieldId: string; storyPointsFieldId: string },
-  existing?: ExistingIssueSnapshot | null
-): IssueSnapshotRow {
-  const currentStatus = issue.fields.status.name;
-  const storyPoints = deriveStoryPointEvents([], fields.storyPointsFieldId, issue);
-  const allSprintIds = new Set([sprintId, ...getSprintIdsFromField(issue, fields.sprintFieldId)]);
-  const lastSprintId = deriveLastSprintId(issue, allSprintIds, fields.sprintFieldId, []);
-  const updatedAt = new Date(issue.fields.updated);
-  const currentAssigneeId = issue.fields.assignee?.accountId ?? null;
-  const currentAssigneeName = normalizeDisplayName(issue.fields.assignee?.displayName ?? null);
-  const originalAssigneeId =
-    existing?.originalAssigneeId ??
-    currentAssigneeId ??
-    issue.fields.creator?.accountId ??
-    null;
-  const originalAssigneeName =
-    existing?.originalAssigneeName ??
-    currentAssigneeName ??
-    normalizeDisplayName(issue.fields.creator?.displayName ?? null);
-  const firstInProgressAt =
-    existing?.firstInProgressAt ??
-    (IN_PROGRESS_STATUSES.has(currentStatus) ? updatedAt : null);
-  const finalDoneAt = DONE_STATUSES.has(currentStatus)
-    ? existing?.finalDoneAt ?? updatedAt
-    : null;
-  const finalAbandonedAt = ABANDONED_STATUSES.has(currentStatus)
-    ? existing?.finalAbandonedAt ?? updatedAt
-    : null;
-  const terminalAt = finalDoneAt ?? finalAbandonedAt;
-  const leadExecutionMinutes =
-    firstInProgressAt && terminalAt
-      ? differenceInMinutes(firstInProgressAt, terminalAt)
-      : existing?.leadExecutionMinutes ?? null;
-
-  return {
-    id: issue.id,
-    jiraIssueId: issue.id,
-    key: issue.key,
-    projectKey: issue.fields.project.key,
-    issueType: issue.fields.issuetype.name,
-    summary: issue.fields.summary,
-    currentStatus,
-    storyPointsLatest: storyPoints.storyPointsLatest ?? existing?.storyPointsLatest ?? null,
-    originalAssigneeId,
-    originalAssigneeName,
-    finalAssigneeId: currentAssigneeId,
-    finalAssigneeName: currentAssigneeName,
-    finalEstimatorId: existing?.finalEstimatorId ?? null,
-    finalEstimatorName: existing?.finalEstimatorName ?? null,
-    firstInProgressAt,
-    finalDoneAt,
-    finalAbandonedAt,
-    leadExecutionMinutes,
-    activeWorkMinutes: existing?.activeWorkMinutes ?? null,
-    handoffDetected:
-      Boolean(originalAssigneeId) &&
-      Boolean(currentAssigneeId) &&
-      originalAssigneeId !== currentAssigneeId,
-    reopenedCount: existing?.reopenedCount ?? 0,
-    createdAt: new Date(issue.fields.created),
-    updatedAt,
-    isLastSprint: sprintId === lastSprintId
-  };
-}
-
-async function upsertIssueSnapshots(rows: IssueSnapshotRow[]) {
-  if (rows.length === 0) {
-    return;
-  }
-
-  await prisma.$executeRaw`
-    INSERT INTO "JiraIssue" (
-      "id",
-      "jiraIssueId",
-      "key",
-      "projectKey",
-      "issueType",
-      "summary",
-      "currentStatus",
-      "storyPointsLatest",
-      "originalAssigneeId",
-      "originalAssigneeName",
-      "finalAssigneeId",
-      "finalAssigneeName",
-      "finalEstimatorId",
-      "finalEstimatorName",
-      "firstInProgressAt",
-      "finalDoneAt",
-      "finalAbandonedAt",
-      "leadExecutionMinutes",
-      "activeWorkMinutes",
-      "handoffDetected",
-      "reopenedCount",
-      "createdAt",
-      "updatedAt",
-      "syncedAt"
-    )
-    VALUES ${Prisma.join(rows.map((row) => Prisma.sql`(
-      ${row.id},
-      ${row.jiraIssueId},
-      ${row.key},
-      ${row.projectKey},
-      ${row.issueType},
-      ${row.summary},
-      ${row.currentStatus},
-      ${row.storyPointsLatest},
-      ${row.originalAssigneeId},
-      ${row.originalAssigneeName},
-      ${row.finalAssigneeId},
-      ${row.finalAssigneeName},
-      ${row.finalEstimatorId},
-      ${row.finalEstimatorName},
-      ${row.firstInProgressAt},
-      ${row.finalDoneAt},
-      ${row.finalAbandonedAt},
-      ${row.leadExecutionMinutes},
-      ${row.activeWorkMinutes},
-      ${row.handoffDetected},
-      ${row.reopenedCount},
-      ${row.createdAt},
-      ${row.updatedAt},
-      NOW()
-    )`))}
-    ON CONFLICT ("jiraIssueId") DO UPDATE SET
-      "key" = EXCLUDED."key",
-      "projectKey" = EXCLUDED."projectKey",
-      "issueType" = EXCLUDED."issueType",
-      "summary" = EXCLUDED."summary",
-      "currentStatus" = EXCLUDED."currentStatus",
-      "storyPointsLatest" = EXCLUDED."storyPointsLatest",
-      "originalAssigneeId" = EXCLUDED."originalAssigneeId",
-      "originalAssigneeName" = EXCLUDED."originalAssigneeName",
-      "finalAssigneeId" = EXCLUDED."finalAssigneeId",
-      "finalAssigneeName" = EXCLUDED."finalAssigneeName",
-      "finalEstimatorId" = EXCLUDED."finalEstimatorId",
-      "finalEstimatorName" = EXCLUDED."finalEstimatorName",
-      "firstInProgressAt" = EXCLUDED."firstInProgressAt",
-      "finalDoneAt" = EXCLUDED."finalDoneAt",
-      "finalAbandonedAt" = EXCLUDED."finalAbandonedAt",
-      "leadExecutionMinutes" = EXCLUDED."leadExecutionMinutes",
-      "activeWorkMinutes" = EXCLUDED."activeWorkMinutes",
-      "handoffDetected" = EXCLUDED."handoffDetected",
-      "reopenedCount" = EXCLUDED."reopenedCount",
-      "createdAt" = EXCLUDED."createdAt",
-      "updatedAt" = EXCLUDED."updatedAt",
-      "syncedAt" = NOW()
-  `;
-}
-
-export async function rebuildAnalyticsFacts(options?: { sprintId?: string }) {
+export async function rebuildAnalyticsFacts() {
   const teamMembers = await prisma.teamMember.findMany({
     where: { active: true },
     orderBy: { displayName: "asc" }
   });
   const sprints = await prisma.sprint.findMany({
-    where: options?.sprintId ? { id: options.sprintId } : undefined,
     include: {
       issueLinks: {
         include: {
@@ -732,9 +547,8 @@ export async function rebuildAnalyticsFacts(options?: { sprintId?: string }) {
     }
   });
 
-  const factWhere = options?.sprintId ? { sprintId: options.sprintId } : undefined;
-  await prisma.teamSprintFact.deleteMany({ where: factWhere });
-  await prisma.memberSprintFact.deleteMany({ where: factWhere });
+  await prisma.teamSprintFact.deleteMany();
+  await prisma.memberSprintFact.deleteMany();
 
   for (const sprint of sprints) {
     const relevantIssues = sprint.issueLinks
@@ -844,14 +658,13 @@ export async function rebuildAnalyticsFacts(options?: { sprintId?: string }) {
       }
     }
 
-    await prisma.memberSprintFact.createMany({
-      data: teamMembers.map((teamMember) => {
-        const fact = memberMap.get(teamMember.accountId);
-        const capacity = sprint.memberCapacities.find(
-          (item) => item.accountId === teamMember.accountId
-        );
-
-        return {
+    for (const teamMember of teamMembers) {
+      const fact = memberMap.get(teamMember.accountId);
+      const capacity = sprint.memberCapacities.find(
+        (item) => item.accountId === teamMember.accountId
+      );
+      await prisma.memberSprintFact.create({
+        data: {
           sprintId: sprint.id,
           accountId: teamMember.accountId,
           displayName: teamMember.displayName,
@@ -865,9 +678,9 @@ export async function rebuildAnalyticsFacts(options?: { sprintId?: string }) {
           personalDaysOff: capacity?.personalDaysOff ?? null,
           estimatorDeliveredPoints: fact?.estimatorDeliveredPoints ?? 0,
           ownerDeliveredPoints: fact?.ownerDeliveredPoints ?? 0
-        };
-      })
-    });
+        }
+      });
+    }
   }
 }
 
@@ -986,31 +799,21 @@ export async function importSprintsFromJira() {
   }
 }
 
-export async function importIssuesFromJira(options?: { sprintId?: string }) {
+export async function importIssuesFromJira(trigger: SyncTrigger = "manual") {
   const run = await prisma.syncRun.create({
     data: {
-      trigger: "manual",
+      trigger,
       status: "running",
-      message: options?.sprintId
-        ? `Importing issues and changelog history from sprint ${options.sprintId}`
-        : "Importing issues and changelog history from Jira"
+      message: "Importing issues and changelog history from Jira"
     }
   });
 
   try {
-    const sprintWhere = options?.sprintId ? { id: options.sprintId } : undefined;
     const [sprints, fields, teamMembers] = await Promise.all([
-      prisma.sprint.findMany({
-        where: sprintWhere,
-        orderBy: { startedAt: "asc" }
-      }),
+      prisma.sprint.findMany({ orderBy: { startedAt: "asc" } }),
       getFieldIds(),
       importTeamMembersFromJira()
     ]);
-
-    if (options?.sprintId && sprints.length === 0) {
-      throw new Error(`Sprint ${options.sprintId} was not found locally. Import sprints first.`);
-    }
 
     const issueMap = new Map<string, IssueAccumulator>();
     let fetchedCount = 0;
@@ -1038,7 +841,7 @@ export async function importIssuesFromJira(options?: { sprintId?: string }) {
       await persistIssue(issue, sprintIds, fields);
     }
 
-    await rebuildAnalyticsFacts({ sprintId: options?.sprintId });
+    await rebuildAnalyticsFacts();
 
     await prisma.syncRun.update({
       where: { id: run.id },
@@ -1072,80 +875,215 @@ export async function importIssuesFromJira(options?: { sprintId?: string }) {
   }
 }
 
-export async function refreshSprintFromJira(sprintId: string) {
+export async function refreshSprintFromJira(
+  sprintId: string,
+  trigger: SyncTrigger = "manual"
+) {
+  const sprint = await prisma.sprint.findUnique({
+    where: { id: sprintId },
+    include: {
+      issueLinks: {
+        where: { isLastSprint: true },
+        include: { issue: true }
+      }
+    }
+  });
+
+  if (!sprint) {
+    throw new Error("Selected sprint was not found.");
+  }
+
   const run = await prisma.syncRun.create({
     data: {
-      trigger: "manual",
+      trigger,
       status: "running",
-      message: `Refreshing sprint ${sprintId} from Jira`
+      message: `Refreshing sprint ${sprint.name} from Jira`
     }
   });
 
   try {
-    const [sprint, fields] = await Promise.all([
-      prisma.sprint.findUnique({ where: { id: sprintId } }),
-      getFieldIds()
+    const [fields, teamMembers] = await Promise.all([
+      getFieldIds(),
+      importTeamMembersFromJira()
     ]);
 
-    if (!sprint) {
-      throw new Error(`Sprint ${sprintId} was not found locally. Import sprints first.`);
+    const sprintIssues = await fetchSprintIssues(sprint.jiraSprintId, fields);
+    const fetchedIssueIds = new Set(sprintIssues.map((issue) => issue.id));
+    const staleIssueKeys = sprint.issueLinks
+      .filter((link) => !fetchedIssueIds.has(link.issue.id))
+      .map((link) => link.issue.key);
+
+    for (const issue of sprintIssues) {
+      await persistIssue(
+        issue,
+        new Set(getSprintIdsFromField(issue, fields.sprintFieldId)),
+        fields
+      );
     }
 
-    const issues = await fetchSprintIssues(sprint.jiraSprintId, fields, {
-      includeChangelog: false
-    });
-    const existingIssues = await prisma.jiraIssue.findMany({
-      where: {
-        jiraIssueId: {
-          in: issues.map((issue) => issue.id)
-        }
+    for (const staleIssueKey of staleIssueKeys) {
+      const latestIssue = await fetchIssueByKey(staleIssueKey, fields);
+
+      if (!latestIssue) {
+        await prisma.jiraIssue.deleteMany({
+          where: { key: staleIssueKey }
+        });
+        continue;
       }
-    });
-    const existingMap = new Map(
-      existingIssues.map((issue) => [issue.jiraIssueId, issue])
-    );
-    const hydrationCandidates = issues.filter((issue) =>
-      shouldFetchFullHistory(issue, existingMap.get(issue.id))
-    ).length;
-    const snapshotRows = issues.map((issue) =>
-      buildIssueSnapshotRow(issue, sprint.id, fields, existingMap.get(issue.id))
-    );
 
-    await upsertIssueSnapshots(snapshotRows);
-    await prisma.jiraIssueSprint.deleteMany({ where: { sprintId: sprint.id } });
-
-    if (snapshotRows.length > 0) {
-      await prisma.jiraIssueSprint.createMany({
-        data: snapshotRows.map((row) => ({
-          issueId: row.id,
-          sprintId: sprint.id,
-          isLastSprint: row.isLastSprint
-        }))
-      });
+      await persistIssue(
+        latestIssue,
+        new Set(getSprintIdsFromField(latestIssue, fields.sprintFieldId)),
+        fields
+      );
     }
 
-    await rebuildAnalyticsFacts({ sprintId });
+    await rebuildAnalyticsFacts();
 
     await prisma.syncRun.update({
       where: { id: run.id },
       data: {
         status: "success",
         finishedAt: new Date(),
-        issuesFetched: issues.length,
-        message: `Refreshed ${issues.length} issues from sprint ${sprintId}; ${hydrationCandidates} issues need full history refresh`
+        issuesFetched: sprintIssues.length,
+        sprintsFetched: 1,
+        message: `Refreshed sprint ${sprint.name} with ${sprintIssues.length} live issues and synced ${teamMembers.length} team members`
       }
     });
 
     return {
-      importedIssues: issues.length,
-      scannedSprintIssues: issues.length,
+      importedIssues: sprintIssues.length,
+      scannedSprintIssues: sprintIssues.length,
       sprintCount: 1,
-      teamCount: null,
-      historyHydratedIssues: 0,
-      hydrationCandidates
+      teamCount: teamMembers.length,
+      staleIssues: staleIssueKeys.length
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Jira sprint refresh error";
+
+    await prisma.syncRun.update({
+      where: { id: run.id },
+      data: {
+        status: "failed",
+        finishedAt: new Date(),
+        message
+      }
+    });
+
+    throw error;
+  }
+}
+
+export async function syncIssueByKeyFromJira(
+  issueKey: string,
+  trigger: SyncTrigger = "webhook"
+) {
+  const normalizedKey = issueKey.trim().toUpperCase();
+  const run = await prisma.syncRun.create({
+    data: {
+      trigger,
+      status: "running",
+      message: `Syncing issue ${normalizedKey} from Jira`
+    }
+  });
+
+  try {
+    const fields = await getFieldIds();
+    const issue = await fetchIssueByKey(normalizedKey, fields);
+
+    if (!issue) {
+      await prisma.jiraIssue.deleteMany({
+        where: {
+          key: normalizedKey
+        }
+      });
+    } else {
+      await persistIssue(
+        issue,
+        new Set(getSprintIdsFromField(issue, fields.sprintFieldId)),
+        fields
+      );
+    }
+
+    await rebuildAnalyticsFacts();
+
+    await prisma.syncRun.update({
+      where: { id: run.id },
+      data: {
+        status: "success",
+        finishedAt: new Date(),
+        issuesFetched: 1,
+        message: issue
+          ? `Synced issue ${normalizedKey} from Jira`
+          : `Removed issue ${normalizedKey} from local analytics`
+      }
+    });
+
+    return {
+      issueKey: normalizedKey,
+      removed: issue == null
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown Jira issue sync error";
+
+    await prisma.syncRun.update({
+      where: { id: run.id },
+      data: {
+        status: "failed",
+        finishedAt: new Date(),
+        message
+      }
+    });
+
+    throw error;
+  }
+}
+
+export async function deleteIssueFromAnalytics(
+  input: {
+    issueId?: string | null;
+    issueKey?: string | null;
+  },
+  trigger: SyncTrigger = "webhook"
+) {
+  const issueLabel = input.issueKey?.trim().toUpperCase() ?? input.issueId ?? "unknown issue";
+  const run = await prisma.syncRun.create({
+    data: {
+      trigger,
+      status: "running",
+      message: `Removing ${issueLabel} from local analytics`
+    }
+  });
+
+  try {
+    if (input.issueId) {
+      await prisma.jiraIssue.deleteMany({
+        where: { id: input.issueId }
+      });
+    } else if (input.issueKey) {
+      await prisma.jiraIssue.deleteMany({
+        where: { key: input.issueKey.trim().toUpperCase() }
+      });
+    }
+
+    await rebuildAnalyticsFacts();
+
+    await prisma.syncRun.update({
+      where: { id: run.id },
+      data: {
+        status: "success",
+        finishedAt: new Date(),
+        issuesFetched: 1,
+        message: `Removed ${issueLabel} from local analytics`
+      }
+    });
+
+    return {
+      removed: true,
+      issueLabel
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown Jira issue removal error";
 
     await prisma.syncRun.update({
       where: { id: run.id },

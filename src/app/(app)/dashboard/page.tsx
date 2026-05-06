@@ -53,14 +53,19 @@ export default async function DashboardPage({
             sprints={snapshot.sprints}
             selectedSprintId={snapshot.selectedSprint?.id}
           />
-          {isAdmin ? (
-            <RefreshBoardButton sprintId={snapshot.selectedSprint?.id} />
-          ) : null}
+          {isAdmin ? <RefreshBoardButton sprintId={snapshot.selectedSprint?.id} /> : null}
           <small>
             {snapshot.config
               ? `Board ${snapshot.config.boardId} in ${snapshot.config.projectKey}. ${snapshot.teamCount} active team members in the curated roster.`
               : "Jira connection is not configured in the local database yet."}
           </small>
+          {snapshot.latestSuccessfulSync?.finishedAt ? (
+            <small>
+              Last successful refresh:{" "}
+              {snapshot.latestSuccessfulSync.finishedAt.toLocaleString()} via{" "}
+              {snapshot.latestSuccessfulSync.trigger}.
+            </small>
+          ) : null}
         </div>
       </section>
 
@@ -238,8 +243,8 @@ export default async function DashboardPage({
                       </td>
                       <td>
                         <div className="metric-stack">
-                          <strong>{fact.assignedStoryPoints} assigned</strong>
-                          <span>{fact.deliveredStoryPoints} delivered</span>
+                          <strong>{fact.deliveredStoryPoints} delivered</strong>
+                          <span>{fact.estimatorDeliveredPoints} estimated</span>
                         </div>
                       </td>
                       <td>{fact.capacityDays != null ? `${fact.capacityDays}d` : "N/A"}</td>

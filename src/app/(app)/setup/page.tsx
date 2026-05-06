@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { hasJiraCredentials } from "@/lib/jira/config";
 import { saveJiraSettings } from "@/app/setup/actions";
@@ -7,10 +8,19 @@ import { SetupControls } from "@/components/setup-controls";
 export const dynamic = "force-dynamic";
 
 export default async function SetupPage() {
-  const [config, latestRun] = await Promise.all([
+  const headerStore = await headers();
+  const forwardedProto = headerStore.get("x-forwarded-proto");
+  const host = headerStore.get("host");
+  const appOrigin =
+    forwardedProto && host ? `${forwardedProto}://${host}` : host ? `https://${host}` : "";
+  const [config, latestRun, latestSuccessfulRun] = await Promise.all([
     prisma.jiraSyncConfig.findFirst(),
     prisma.syncRun.findFirst({
       orderBy: { startedAt: "desc" }
+    }),
+    prisma.syncRun.findFirst({
+      where: { status: "success" },
+      orderBy: { finishedAt: "desc" }
     })
   ]);
   const credentialsReady = hasJiraCredentials();
@@ -66,6 +76,52 @@ export default async function SetupPage() {
 
       <section className="panel">
         <div className="panel-header">
+          <p className="eyebrow">Hybrid Sync</p>
+          <h2>Automatic refresh setup</h2>
+        </div>
+        <div className="wiki-grid">
+          <article className="wiki-card">
+            <div className="wiki-card-header">
+              <h3>Scheduled full sync</h3>
+              <code>every 2 hours</code>
+            </div>
+            <p>
+              Production will call <code>/api/cron/jira-sync</code> every 2 hours via Vercel Cron.
+              This does a full Jira import across the synced board scope.
+            </p>
+          </article>
+          <article className="wiki-card">
+            <div className="wiki-card-header">
+              <h3>Webhook push sync</h3>
+              <code>issue changes</code>
+            </div>
+            <p>
+              Configure a Jira webhook that points to <code>{appOrigin || "https://your-app-domain"}/api/jira/webhook</code>.
+              Issue create, update, and delete events will refresh the affected issue data immediately.
+            </p>
+          </article>
+          <article className="wiki-card">
+            <div className="wiki-card-header">
+              <h3>Last successful sync</h3>
+              <code>visible timestamp</code>
+            </div>
+            <p>
+              {latestSuccessfulRun?.finishedAt
+                ? `${latestSuccessfulRun.finishedAt.toLocaleString()} via ${latestSuccessfulRun.trigger}.`
+                : "No successful automatic or manual sync has completed yet."}
+            </p>
+          </article>
+        </div>
+        <ol className="instruction-list">
+          <li>Add `CRON_SECRET` and `JIRA_WEBHOOK_SECRET` to Vercel and `.env.local`.</li>
+          <li>Deploy with the new `vercel.json` cron schedule.</li>
+          <li>In Jira admin, create a webhook for `jira:issue_created`, `jira:issue_updated`, and `jira:issue_deleted` pointing to <code>{appOrigin || "https://your-app-domain"}/api/jira/webhook</code>.</li>
+          <li>Set the webhook secret to the same value as `JIRA_WEBHOOK_SECRET`.</li>
+        </ol>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
           <p className="eyebrow">Next Integration Step</p>
           <h2>What I need from you after the install</h2>
         </div>
@@ -78,7 +134,8 @@ export default async function SetupPage() {
         {latestRun ? (
           <p className="hint">
             Last sync run: <strong>{latestRun.status}</strong> at{" "}
-            {latestRun.startedAt.toLocaleString()}.
+            {latestRun.startedAt.toLocaleString()}
+            {latestRun.trigger ? ` via ${latestRun.trigger}` : ""}.
           </p>
         ) : null}
       </section>

@@ -164,7 +164,7 @@ function buildInsights(input: {
 }
 
 export async function getDashboardSnapshot(selectedSprintId?: string) {
-  const [config, sprintCount, issueCount, teamCount, allFacts, sprintContext] =
+  const [config, sprintCount, issueCount, teamCount, allFacts, sprintContext, latestSuccessfulSync] =
     await Promise.all([
       prisma.jiraSyncConfig.findFirst(),
       prisma.sprint.count(),
@@ -173,7 +173,11 @@ export async function getDashboardSnapshot(selectedSprintId?: string) {
       prisma.teamSprintFact.findMany({
         orderBy: { updatedAt: "desc" }
       }),
-      loadSprintContext(selectedSprintId)
+      loadSprintContext(selectedSprintId),
+      prisma.syncRun.findFirst({
+        where: { status: "success" },
+        orderBy: { finishedAt: "desc" }
+      })
     ]);
 
   const { currentSprint, selectedSprint, sprintMap, sprints } = sprintContext;
@@ -277,6 +281,7 @@ export async function getDashboardSnapshot(selectedSprintId?: string) {
     issueCount,
     sprintCount,
     teamCount,
+    latestSuccessfulSync,
     currentSprint,
     selectedSprint,
     sprints: sprints.map((sprint) => ({
