@@ -1,0 +1,196 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model JiraSyncConfig {
+  id             String   @id @default(cuid())
+  baseUrl        String
+  boardId        Int
+  projectKey     String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Sprint {
+  id                 String   @id
+  boardId            Int
+  jiraSprintId       Int      @unique
+  name               String
+  state              String
+  goal               String?
+  startedAt          DateTime?
+  endedAt            DateTime?
+  completedAt        DateTime?
+  importedAt         DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  issueLinks         JiraIssueSprint[]
+  settings           SprintSettings?
+  memberCapacities   SprintMemberCapacity[]
+}
+
+model SprintSettings {
+  id                String   @id @default(cuid())
+  sprintId          String   @unique
+  sprintWorkDays    Float
+  globalDaysOff     Float    @default(0)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  sprint            Sprint   @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+}
+
+model SprintMemberCapacity {
+  id                   String   @id @default(cuid())
+  sprintId             String
+  accountId            String
+  displayName          String
+  capacityDays         Float
+  personalDaysOff      Float    @default(0)
+  isManualOverride     Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  sprint               Sprint   @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+
+  @@unique([sprintId, accountId])
+}
+
+model JiraIssue {
+  id                    String   @id
+  jiraIssueId           String   @unique
+  key                   String   @unique
+  projectKey            String
+  issueType             String
+  summary               String
+  currentStatus         String
+  storyPointsLatest     Float?
+  originalAssigneeId    String?
+  originalAssigneeName  String?
+  finalAssigneeId       String?
+  finalAssigneeName     String?
+  finalEstimatorId      String?
+  finalEstimatorName    String?
+  firstInProgressAt     DateTime?
+  finalDoneAt           DateTime?
+  finalAbandonedAt      DateTime?
+  leadExecutionMinutes  Int?
+  activeWorkMinutes     Int?
+  handoffDetected       Boolean  @default(false)
+  reopenedCount         Int      @default(0)
+  createdAt             DateTime
+  updatedAt             DateTime
+  syncedAt              DateTime @default(now())
+  sprintLinks           JiraIssueSprint[]
+  statusChanges         JiraIssueStatusChange[]
+  assigneeChanges       JiraIssueAssigneeChange[]
+  storyPointChanges     JiraIssueStoryPointChange[]
+}
+
+model JiraIssueSprint {
+  id                String    @id @default(cuid())
+  issueId           String
+  sprintId          String
+  isLastSprint      Boolean   @default(false)
+  addedAt           DateTime?
+  removedAt         DateTime?
+  issue             JiraIssue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  sprint            Sprint     @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, sprintId])
+}
+
+model JiraIssueStatusChange {
+  id             String   @id @default(cuid())
+  issueId        String
+  fromStatus     String?
+  toStatus       String
+  changedAt      DateTime
+  authorId       String?
+  authorName     String?
+  issue          JiraIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+}
+
+model JiraIssueAssigneeChange {
+  id               String   @id @default(cuid())
+  issueId          String
+  fromAccountId    String?
+  fromDisplayName  String?
+  toAccountId      String?
+  toDisplayName    String?
+  changedAt        DateTime
+  issue            JiraIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+}
+
+model JiraIssueStoryPointChange {
+  id               String   @id @default(cuid())
+  issueId          String
+  fromValue        Float?
+  toValue          Float?
+  changedAt        DateTime
+  authorId         String?
+  authorName       String?
+  issue            JiraIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+}
+
+model TeamSprintFact {
+  id                        String   @id @default(cuid())
+  sprintId                  String   @unique
+  committedIssues           Int      @default(0)
+  deliveredIssues           Int      @default(0)
+  abandonedIssues           Int      @default(0)
+  committedStoryPoints      Float    @default(0)
+  deliveredStoryPoints      Float    @default(0)
+  avgLeadExecutionMinutes   Int?
+  avgActiveWorkMinutes      Int?
+  scopeAddedIssues          Int      @default(0)
+  spilloverIssues           Int      @default(0)
+  handoffIssues             Int      @default(0)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
+model MemberSprintFact {
+  id                        String   @id @default(cuid())
+  sprintId                  String
+  accountId                 String
+  displayName               String
+  completedIssues           Int      @default(0)
+  notCompletedIssues        Int      @default(0)
+  abandonedIssues           Int      @default(0)
+  deliveredStoryPoints      Float    @default(0)
+  avgLeadExecutionMinutes   Int?
+  avgActiveWorkMinutes      Int?
+  capacityDays              Float?
+  personalDaysOff           Float?
+  estimatorDeliveredPoints  Float    @default(0)
+  ownerDeliveredPoints      Float    @default(0)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@unique([sprintId, accountId])
+}
+
+model SyncRun {
+  id              String   @id @default(cuid())
+  trigger         String
+  status          String
+  startedAt       DateTime @default(now())
+  finishedAt      DateTime?
+  issuesFetched   Int      @default(0)
+  sprintsFetched  Int      @default(0)
+  message         String?
+}
+
+model TeamMember {
+  accountId     String   @id
+  displayName   String
+  active        Boolean  @default(true)
+  source        String   @default("jira-assignable")
+  importedAt    DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
