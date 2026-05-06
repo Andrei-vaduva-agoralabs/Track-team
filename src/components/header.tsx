@@ -27,7 +27,12 @@ function GearIcon() {
 
 export async function Header() {
   const session = await getEmailSession();
-  const isAdmin = session?.user.role === "admin";
+
+  if (!session?.user) {
+    return null;
+  }
+
+  const isAdmin = session.user.role === "admin";
 
   return (
     <header className="shell-header">
@@ -49,18 +54,16 @@ export async function Header() {
             <GearIcon />
           </Link>
         ) : null}
-        {session?.user ? (
-          <form
-            action={async () => {
-              "use server";
-              await clearSession();
-            }}
-          >
-            <button className="nav-button" type="submit">
-              Sign out
-            </button>
-          </form>
-        ) : null}
+        <form
+          action={async () => {
+            "use server";
+            await clearSession();
+          }}
+        >
+          <button className="nav-button" type="submit">
+            Sign out
+          </button>
+        </form>
       </nav>
     </header>
   );
