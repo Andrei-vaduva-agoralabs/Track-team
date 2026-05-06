@@ -336,6 +336,34 @@ function terminalDateLabel(issue: { finalDoneAt: Date | null; finalAbandonedAt: 
   return terminal ? terminal.toLocaleDateString() : "Open";
 }
 
+function jiraIssueUrl(issueKey: string) {
+  const baseUrl = process.env.JIRA_BASE_URL?.replace(/\/$/, "");
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  return `${baseUrl}/browse/${issueKey}`;
+}
+
+function statusTone(status: string) {
+  const normalized = status.trim().toLowerCase();
+
+  if (normalized === "done") {
+    return "available";
+  }
+
+  if (normalized === "abandoned") {
+    return "warning";
+  }
+
+  if (normalized === "in progress") {
+    return "balanced";
+  }
+
+  return "neutral";
+}
+
 export async function getMemberDetailSnapshot(accountId: string, selectedSprintId?: string) {
   const [member, sprintContext] = await Promise.all([
     prisma.teamMember.findUnique({
@@ -383,11 +411,12 @@ export async function getMemberDetailSnapshot(accountId: string, selectedSprintI
     id: link.issue.id,
     key: link.issue.key,
     summary: link.issue.summary,
+    jiraUrl: jiraIssueUrl(link.issue.key),
     currentStatus: link.issue.currentStatus,
+    statusTone: statusTone(link.issue.currentStatus),
     storyPointsLatest: link.issue.storyPointsLatest ?? 0,
     role: issueOwnershipRole(link.issue, accountId),
     leadExecutionLabel: minutesToLabel(link.issue.leadExecutionMinutes),
-    activeWorkLabel: minutesToLabel(link.issue.activeWorkMinutes),
     startedAt: link.issue.firstInProgressAt?.toLocaleDateString() ?? "Not started",
     terminalAt: terminalDateLabel(link.issue)
   }));

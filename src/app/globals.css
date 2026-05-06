@@ -470,6 +470,13 @@ tbody tr:hover {
   line-height: 1.45;
 }
 
+.issue-link {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-decoration-color: rgba(15, 118, 110, 0.3);
+  text-underline-offset: 0.18em;
+}
+
 .form-grid {
   display: grid;
   gap: 16px;
@@ -815,6 +822,12 @@ tbody tr:hover {
   font-size: 0.8rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.status-pill-compact {
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  line-height: 1;
 }
 
 .status-pill.over {

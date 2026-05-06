@@ -91,11 +91,6 @@ export default async function MemberDetailPage({
           value={snapshot.stats?.avgLeadExecutionLabel ?? "No data"}
           detail="Average first-start to terminal-state duration"
         />
-        <StatCard
-          label="Active work time"
-          value={snapshot.stats?.avgActiveWorkLabel ?? "No data"}
-          detail="Average summed In Progress time across involved issues"
-        />
       </section>
 
       <section className="panel">
@@ -117,7 +112,6 @@ export default async function MemberDetailPage({
                 <th>Status</th>
                 <th>SP</th>
                 <th>Lead time</th>
-                <th>Active work</th>
                 <th>Started</th>
                 <th>Terminal</th>
               </tr>
@@ -125,22 +119,36 @@ export default async function MemberDetailPage({
             <tbody>
               {snapshot.issues.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>No issue involvement found for this sprint.</td>
+                  <td colSpan={7}>No issue involvement found for this sprint.</td>
                 </tr>
               ) : (
                 snapshot.issues.map((issue) => (
                   <tr key={issue.id}>
                     <td>
                       <div className="issue-cell">
-                        <strong>{issue.key}</strong>
+                        {issue.jiraUrl ? (
+                          <a
+                            className="issue-link"
+                            href={issue.jiraUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <strong>{issue.key}</strong>
+                          </a>
+                        ) : (
+                          <strong>{issue.key}</strong>
+                        )}
                         <span>{issue.summary}</span>
                       </div>
                     </td>
                     <td>{issue.role}</td>
-                    <td>{issue.currentStatus}</td>
+                    <td>
+                      <span className={`status-pill status-pill-compact ${issue.statusTone}`}>
+                        {issue.currentStatus}
+                      </span>
+                    </td>
                     <td>{issue.storyPointsLatest}</td>
                     <td>{issue.leadExecutionLabel}</td>
-                    <td>{issue.activeWorkLabel}</td>
                     <td>{issue.startedAt}</td>
                     <td>{issue.terminalAt}</td>
                   </tr>
