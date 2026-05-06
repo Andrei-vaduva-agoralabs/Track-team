@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SprintSwitcher } from "@/components/sprint-switcher";
 import { StatCard } from "@/components/stat-card";
 import { CapacityBulkInputs } from "@/components/capacity-bulk-inputs";
+import { CapacitySaveButton } from "@/components/capacity-save-button";
 import { getCapacitySnapshot } from "@/lib/capacity";
 import { saveCapacityAction } from "@/app/capacity/actions";
 import { isCurrentUserAdmin } from "@/lib/access";
@@ -247,7 +248,7 @@ export default async function CapacityPage({
 
           {isAdmin ? (
             <div className="action-row">
-              <button type="submit">Save sprint capacity</button>
+              <CapacitySaveButton />
             </div>
           ) : null}
         </form>
