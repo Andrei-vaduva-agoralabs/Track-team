@@ -100,7 +100,6 @@ export default async function BackofficePage({
                 <th>Role</th>
                 <th>Status</th>
                 <th>Password</th>
-                <th>Last login</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -115,7 +114,6 @@ export default async function BackofficePage({
                     </span>
                   </td>
                   <td>{user.passwordUpdatedAt ? user.passwordUpdatedAt.toLocaleString() : "Not set"}</td>
-                  <td>{user.lastLoginAt ? user.lastLoginAt.toLocaleString() : "Never"}</td>
                   <td>
                     <div className="action-row">
                       <form action={resetUserPasswordAction}>
