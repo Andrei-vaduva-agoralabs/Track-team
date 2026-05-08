@@ -960,6 +960,89 @@ tbody tr:hover {
   gap: 8px;
 }
 
+.report-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-sheet {
+  padding: 24px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(244, 248, 245, 0.9));
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 18px;
+}
+
+.report-sheet-header h3,
+.report-section-block h4,
+.report-callout-card strong {
+  margin: 0;
+}
+
+.report-summary,
+.report-callout-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.report-columns {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-section-block {
+  display: grid;
+  gap: 10px;
+}
+
+.report-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.report-output-block {
+  display: grid;
+  gap: 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.report-output-block textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 240px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.report-callout-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.report-callout-card {
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.86);
+  display: grid;
+  gap: 12px;
+}
+
 .wiki-inline-pills,
 .wiki-link-row {
   display: flex;
@@ -1009,7 +1092,10 @@ code {
   }
 
   .insight-grid,
-  .trend-grid {
+  .trend-grid,
+  .report-grid,
+  .report-columns,
+  .report-callout-grid {
     grid-template-columns: 1fr;
   }
 }

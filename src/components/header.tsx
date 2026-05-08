@@ -3,7 +3,8 @@ import { clearSession, getEmailSession } from "@/lib/email-code-auth";
 
 const items = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/capacity", label: "Capacity" }
+  { href: "/capacity", label: "Capacity" },
+  { href: "/reports", label: "Reports" }
 ];
 
 function GearIcon() {
