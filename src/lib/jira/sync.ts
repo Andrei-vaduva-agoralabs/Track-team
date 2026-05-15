@@ -17,6 +17,7 @@ const ISSUE_TYPES = new Set(["Story", "Bug"]);
 const IN_PROGRESS_STATUSES = new Set(["In Progress"]);
 const DONE_STATUSES = new Set(["Done"]);
 const ABANDONED_STATUSES = new Set(["Abandoned"]);
+const TEAM_MEMBER_SYNC_MAX_AGE_MINUTES = 360;
 
 type IssueAccumulator = {
   issue: JiraIssue;
@@ -86,7 +87,26 @@ async function getFieldIds() {
   };
 }
 
-async function importTeamMembersFromJira() {
+async function syncTeamMembersFromJira(options?: { force?: boolean; maxAgeMinutes?: number }) {
+  const force = options?.force ?? false;
+  const maxAgeMinutes = options?.maxAgeMinutes ?? TEAM_MEMBER_SYNC_MAX_AGE_MINUTES;
+
+  if (!force) {
+    const latestTeamMember = await prisma.teamMember.findFirst({
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true }
+    });
+
+    if (
+      latestTeamMember &&
+      latestTeamMember.updatedAt.getTime() >= Date.now() - maxAgeMinutes * 60_000
+    ) {
+      return prisma.teamMember.count({
+        where: { active: true }
+      });
+    }
+  }
+
   const env = getJiraEnv();
   const users = await jiraRequest<JiraUser[]>(
     "/rest/api/3/user/assignable/search",
@@ -121,7 +141,7 @@ async function importTeamMembersFromJira() {
     });
   }
 
-  return users;
+  return users.length;
 }
 
 async function fetchSprintIssues(
@@ -857,10 +877,10 @@ export async function importIssuesFromJira(trigger: SyncTrigger = "manual") {
   });
 
   try {
-    const [sprints, fields, teamMembers] = await Promise.all([
+    const [sprints, fields, teamCount] = await Promise.all([
       prisma.sprint.findMany({ orderBy: { startedAt: "asc" } }),
       getFieldIds(),
-      importTeamMembersFromJira()
+      syncTeamMembersFromJira()
     ]);
 
     const issueMap = new Map<string, IssueAccumulator>();
@@ -897,7 +917,7 @@ export async function importIssuesFromJira(trigger: SyncTrigger = "manual") {
         status: "success",
         finishedAt: new Date(),
         issuesFetched: issueMap.size,
-        message: `Imported ${issueMap.size} unique issues from ${sprints.length} sprints and synced ${teamMembers.length} team members`
+        message: `Imported ${issueMap.size} unique issues from ${sprints.length} sprints and synced ${teamCount} team members`
       }
     });
 
@@ -905,7 +925,7 @@ export async function importIssuesFromJira(trigger: SyncTrigger = "manual") {
       importedIssues: issueMap.size,
       scannedSprintIssues: fetchedCount,
       sprintCount: sprints.length,
-      teamCount: teamMembers.length
+      teamCount
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Jira issue import error";
@@ -950,9 +970,9 @@ export async function refreshSprintFromJira(
   });
 
   try {
-    const [fields, teamMembers] = await Promise.all([
+    const [fields, teamCount] = await Promise.all([
       getFieldIds(),
-      importTeamMembersFromJira()
+      syncTeamMembersFromJira()
     ]);
 
     const sprintIssues = await fetchSprintIssues(sprint.jiraSprintId, fields);
@@ -1013,7 +1033,7 @@ export async function refreshSprintFromJira(
         finishedAt: new Date(),
         issuesFetched: sprintIssues.length,
         sprintsFetched: 1,
-        message: `Refreshed sprint ${sprint.name}: ${changedIssueCount} changed, ${skippedIssueCount} unchanged, ${staleIssueKeys.length} stale checks, ${teamMembers.length} team members synced`
+        message: `Refreshed sprint ${sprint.name}: ${changedIssueCount} changed, ${skippedIssueCount} unchanged, ${staleIssueKeys.length} stale checks, ${teamCount} team members synced`
       }
     });
 
@@ -1021,7 +1041,7 @@ export async function refreshSprintFromJira(
       importedIssues: sprintIssues.length,
       scannedSprintIssues: sprintIssues.length,
       sprintCount: 1,
-      teamCount: teamMembers.length,
+      teamCount,
       staleIssues: staleIssueKeys.length,
       changedIssues: changedIssueCount,
       skippedIssues: skippedIssueCount
