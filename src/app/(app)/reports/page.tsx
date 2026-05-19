@@ -1,11 +1,24 @@
 import Link from "next/link";
 import { SprintSwitcher } from "@/components/sprint-switcher";
-import { StatCard } from "@/components/stat-card";
 import { getReportsSnapshot } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
 
-type ReportBlockProps = {
+type MetricGaugeProps = {
+  label: string;
+  value: string;
+  percent: number;
+  detail: string;
+  tone: "teal" | "violet" | "amber" | "slate";
+};
+
+type IssueStackProps = {
+  openIssues: number;
+  doneIssues: number;
+  abandonedIssues: number;
+};
+
+type ReportPanelProps = {
   badge: string;
   title: string;
   summary: string;
@@ -13,61 +26,153 @@ type ReportBlockProps = {
   risks: string[];
   actions: string[];
   exportText: string;
+  tone: "mid" | "retro";
 };
 
-function ReportBlock({
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function MetricGauge({ label, value, percent, detail, tone }: MetricGaugeProps) {
+  return (
+    <article className={`report-gauge report-gauge-${tone}`}>
+      <div
+        className="report-gauge-ring"
+        style={{ ["--gauge-value" as string]: `${clampPercent(percent)}%` }}
+      >
+        <div className="report-gauge-core">
+          <strong>{value}</strong>
+          <span>{label}</span>
+        </div>
+      </div>
+      <p>{detail}</p>
+    </article>
+  );
+}
+
+function IssueStack({ openIssues, doneIssues, abandonedIssues }: IssueStackProps) {
+  const total = Math.max(openIssues + doneIssues + abandonedIssues, 1);
+
+  const segments = [
+    { label: "Done", value: doneIssues, className: "done" },
+    { label: "Open", value: openIssues, className: "open" },
+    { label: "Abandoned", value: abandonedIssues, className: "abandoned" }
+  ];
+
+  return (
+    <article className="report-visual-card">
+      <div className="report-card-head">
+        <div>
+          <p className="eyebrow">Issue State</p>
+          <h3>Sprint outcome mix</h3>
+        </div>
+      </div>
+      <div className="report-stack-bar" aria-hidden="true">
+        {segments.map((segment) => (
+          <span
+            key={segment.label}
+            className={segment.className}
+            style={{ width: `${(segment.value / total) * 100}%` }}
+          />
+        ))}
+      </div>
+      <div className="report-stack-legend">
+        {segments.map((segment) => (
+          <div key={segment.label} className="report-stack-item">
+            <span className={`report-stack-dot ${segment.className}`} />
+            <strong>{segment.value}</strong>
+            <small>{segment.label}</small>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SignalStrip({
+  title,
+  metrics
+}: {
+  title: string;
+  metrics: Array<{ label: string; value: string; tone: "teal" | "amber" | "rose" | "slate" }>;
+}) {
+  return (
+    <article className="report-visual-card">
+      <div className="report-card-head">
+        <div>
+          <p className="eyebrow">Signal Strip</p>
+          <h3>{title}</h3>
+        </div>
+      </div>
+      <div className="report-signal-strip">
+        {metrics.map((metric) => (
+          <div key={metric.label} className={`report-signal-pill report-signal-${metric.tone}`}>
+            <strong>{metric.value}</strong>
+            <span>{metric.label}</span>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function ReportChipList({
+  title,
+  items,
+  tone
+}: {
+  title: string;
+  items: string[];
+  tone: "good" | "risk" | "action";
+}) {
+  return (
+    <section className="report-chip-section">
+      <div className="report-chip-head">
+        <h4>{title}</h4>
+      </div>
+      <div className="report-chip-list">
+        {items.map((item) => (
+          <article key={item} className={`report-chip report-chip-${tone}`}>
+            <p>{item}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReportPanel({
   badge,
   title,
   summary,
   highlights,
   risks,
   actions,
-  exportText
-}: ReportBlockProps) {
+  exportText,
+  tone
+}: ReportPanelProps) {
   return (
-    <article className="report-sheet">
-      <div className="report-sheet-header">
+    <article className={`report-panel report-panel-${tone}`}>
+      <div className="report-panel-head">
         <div>
           <p className="eyebrow">{badge}</p>
           <h3>{title}</h3>
         </div>
       </div>
 
-      <p className="report-summary">{summary}</p>
+      <p className="report-panel-summary">{summary}</p>
 
-      <div className="report-columns">
-        <section className="report-section-block">
-          <h4>Highlights</h4>
-          <ul className="report-list">
-            {highlights.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="report-section-block">
-          <h4>Risks</h4>
-          <ul className="report-list">
-            {risks.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
+      <div className="report-chip-grid">
+        <ReportChipList title="Highlights" items={highlights} tone="good" />
+        <ReportChipList title="Risks" items={risks} tone="risk" />
       </div>
 
-      <section className="report-section-block">
-        <h4>Recommended talking points</h4>
-        <ul className="report-list">
-          {actions.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </section>
+      <ReportChipList title="Talking points" items={actions} tone="action" />
 
-      <label className="report-output-block">
-        <span>Copy-ready draft</span>
-        <textarea readOnly value={exportText} rows={16} />
-      </label>
+      <details className="report-export">
+        <summary>Open copy-ready narrative</summary>
+        <textarea readOnly value={exportText} rows={14} />
+      </details>
     </article>
   );
 }
@@ -101,8 +206,7 @@ export default async function ReportsPage({
   }
 
   const selectedSprintName = snapshot.selectedSprint.name;
-  const currentSprintName =
-    snapshot.currentSprint?.name ?? snapshot.selectedSprint.name;
+  const currentSprintName = snapshot.currentSprint?.name ?? selectedSprintName;
 
   if (!snapshot.stats || !snapshot.midSprint || !snapshot.retrospective) {
     return (
@@ -137,8 +241,8 @@ export default async function ReportsPage({
           <p className="eyebrow">Reports</p>
           <h2>{selectedSprintName}</h2>
           <p className="hero-copy">
-            Generate native sprint narratives for check-ins and retrospectives using the
-            same Jira facts that power the dashboard and capacity views.
+            Review the sprint through visual signals first, then use the report drafts only
+            when you need a speaking narrative for check-ins or retrospectives.
           </p>
         </div>
         <div className="hero-focus">
@@ -156,98 +260,121 @@ export default async function ReportsPage({
         </div>
       </section>
 
-      <section className="stats-grid">
-        <StatCard
-          label="Sprint status"
-          value={snapshot.stats.progressLabel}
-          detail="Timeline posture based on Jira sprint dates"
-          icon="clock"
-          tone="slate"
-        />
-        <StatCard
-          label="Delivery ratio"
+      <section className="report-overview-grid">
+        <MetricGauge
+          label="Delivery"
           value={snapshot.stats.deliveryRatioLabel}
-          detail={`Change vs previous sprint: ${snapshot.stats.deliveryDeltaLabel}`}
-          icon="check"
-          tone="green"
-        />
-        <StatCard
-          label="Point conversion"
-          value={snapshot.stats.pointConversionLabel}
-          detail={`Change vs previous sprint: ${snapshot.stats.pointDeltaLabel}`}
-          icon="target"
-          tone="violet"
-        />
-        <StatCard
-          label="Open issues"
-          value={String(snapshot.stats.openIssues)}
-          detail={`${snapshot.stats.doneIssues} done, ${snapshot.stats.abandonedIssues} abandoned`}
-          icon="activity"
-          tone="amber"
-        />
-        <StatCard
-          label="Scope pressure"
-          value={String(snapshot.stats.scopeAddedIssues)}
-          detail={`${snapshot.stats.spilloverIssues} spillover issues, ${snapshot.stats.handoffIssues} handoffs`}
-          icon="handoff"
-          tone="rose"
-        />
-        <StatCard
-          label="Capacity gap"
-          value={snapshot.stats.capacityGapLabel}
-          detail={snapshot.stats.capacityPosture}
-          icon="points"
+          percent={snapshot.stats.deliveryRatioValue}
+          detail={`${snapshot.stats.deliveredIssues}/${snapshot.stats.committedIssues} issues converted`}
           tone="teal"
         />
+        <MetricGauge
+          label="Points"
+          value={snapshot.stats.pointConversionLabel}
+          percent={snapshot.stats.pointConversionValue}
+          detail={`${snapshot.stats.deliveredStoryPoints}/${snapshot.stats.committedStoryPoints} story points converted`}
+          tone="violet"
+        />
+        <MetricGauge
+          label="Timeline"
+          value={snapshot.stats.progressLabel}
+          percent={snapshot.stats.progressValue}
+          detail="Elapsed sprint window based on Jira dates"
+          tone="slate"
+        />
+        <MetricGauge
+          label="Capacity"
+          value={snapshot.stats.capacityGapLabel}
+          percent={snapshot.stats.capacityGapLabel.startsWith("-") ? 82 : 58}
+          detail={snapshot.stats.capacityPosture}
+          tone="amber"
+        />
+      </section>
+
+      <section className="report-visual-grid">
+        <IssueStack
+          openIssues={snapshot.stats.openIssues}
+          doneIssues={snapshot.stats.doneIssues}
+          abandonedIssues={snapshot.stats.abandonedIssues}
+        />
+        <SignalStrip
+          title="Pressure points"
+          metrics={[
+            { label: "Scope added", value: String(snapshot.stats.scopeAddedIssues), tone: "amber" },
+            { label: "Spillover", value: String(snapshot.stats.spilloverIssues), tone: "slate" },
+            { label: "Handoffs", value: String(snapshot.stats.handoffIssues), tone: "rose" },
+            { label: "Story / bug mix", value: `${snapshot.stats.storyCount}/${snapshot.stats.bugCount}`, tone: "teal" }
+          ]}
+        />
       </section>
 
       <section className="panel">
         <div className="panel-header panel-header-inline">
           <div>
-            <p className="eyebrow">Signal Pack</p>
-            <h2>What stands out in this sprint</h2>
+            <p className="eyebrow">Member Signals</p>
+            <h2>Who to mention first</h2>
           </div>
           <p className="panel-meta">
-            Use these cards as fast context before you read the generated drafts.
+            The cards are ranked to help you move quickly into the people most worth discussing.
           </p>
         </div>
-        <div className="insight-grid">
-          <article className="insight-card">
-            <span>Scope mix</span>
-            <strong>{snapshot.stats.storyCount} stories / {snapshot.stats.bugCount} bugs</strong>
-            <p>The selected sprint currently tracks only Stories and Bugs in analytics.</p>
-          </article>
-          <article className="insight-card">
-            <span>Top delivery signal</span>
-            <strong>{snapshot.memberCallouts[0]?.name ?? "No standout yet"}</strong>
-            <p>{snapshot.stats.topDriverDetail}</p>
-          </article>
-          <article className="insight-card">
-            <span>Ownership pressure</span>
-            <strong>{snapshot.stats.handoffIssues} handoffs</strong>
-            <p>Ownership changes after work starts usually correlate with coordination drag.</p>
-          </article>
-          <article className="insight-card">
-            <span>Planning posture</span>
-            <strong>{snapshot.stats.capacityGapLabel}</strong>
-            <p>{snapshot.stats.capacityPosture}</p>
-          </article>
+        <div className="report-member-grid">
+          {snapshot.memberSpotlights.length === 0 ? (
+            <article className="report-member-card">
+              <strong>No member spotlight yet</strong>
+              <p>Once sprint facts are ready, this area will surface the strongest individual signals.</p>
+            </article>
+          ) : (
+            snapshot.memberSpotlights.map((member, index) => (
+              <article key={member.name} className="report-member-card">
+                <div className="report-member-head">
+                  <span className="report-rank">#{index + 1}</span>
+                  <strong>{member.name}</strong>
+                </div>
+                <div className="report-member-metrics">
+                  <div>
+                    <span>Delivered SP</span>
+                    <strong>{member.deliveredStoryPoints}</strong>
+                  </div>
+                  <div>
+                    <span>Completed</span>
+                    <strong>{member.completedIssues}</strong>
+                  </div>
+                  <div>
+                    <span>Estimated</span>
+                    <strong>{member.estimatorDeliveredPoints}</strong>
+                  </div>
+                  <div>
+                    <span>Handoffs</span>
+                    <strong>{member.handoffIssues}</strong>
+                  </div>
+                </div>
+                <div className="report-member-footer">
+                  <small>{member.leadExecutionLabel} lead</small>
+                  <small>{member.capacityGapLabel} capacity gap</small>
+                </div>
+                <Link className="secondary-action" href={member.href}>
+                  Open member detail
+                </Link>
+              </article>
+            ))
+          )}
         </div>
       </section>
 
-      <section className="report-grid">
-        <ReportBlock {...snapshot.midSprint} />
-        <ReportBlock {...snapshot.retrospective} />
+      <section className="report-panel-grid">
+        <ReportPanel {...snapshot.midSprint} tone="mid" />
+        <ReportPanel {...snapshot.retrospective} tone="retro" />
       </section>
 
       <section className="panel">
         <div className="panel-header panel-header-inline">
           <div>
-            <p className="eyebrow">Member Callouts</p>
-            <h2>People to mention in the review</h2>
+            <p className="eyebrow">Callouts</p>
+            <h2>Explicit review prompts</h2>
           </div>
           <p className="panel-meta">
-            Open the member page when one of these signals needs issue-level detail.
+            Use these when you need quick talking anchors during planning reviews or sprint retros.
           </p>
         </div>
         <div className="report-callout-grid">

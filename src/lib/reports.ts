@@ -263,19 +263,31 @@ export async function getReportsSnapshot(selectedSprintId?: string) {
   const stats = {
     progressLabel: progress.label,
     progressDetail: progress.detail,
+    progressValue:
+      progress.label === "Future sprint"
+        ? 0
+        : progress.label === "Closed sprint"
+          ? 100
+          : Number.parseInt(progress.label, 10) || 0,
     deliveryRatioLabel: ratioLabel(
       selectedTeamFact.deliveredIssues,
       selectedTeamFact.committedIssues
     ),
+    deliveryRatioValue: deliveryRatio,
     pointConversionLabel: ratioLabel(
       selectedTeamFact.deliveredStoryPoints,
       selectedTeamFact.committedStoryPoints
     ),
+    pointConversionValue: pointConversion,
     openIssues,
     doneIssues,
     abandonedIssues,
     bugCount,
     storyCount,
+    committedIssues: selectedTeamFact.committedIssues,
+    deliveredIssues: selectedTeamFact.deliveredIssues,
+    committedStoryPoints: selectedTeamFact.committedStoryPoints,
+    deliveredStoryPoints: selectedTeamFact.deliveredStoryPoints,
     deliveryDeltaLabel:
       deliveryDelta == null ? "No comparison" : formatDelta(deliveryDelta),
     pointDeltaLabel: pointDelta == null ? "No comparison" : formatDelta(pointDelta),
@@ -478,6 +490,37 @@ export async function getReportsSnapshot(selectedSprintId?: string) {
       : null
   ].filter((item): item is NonNullable<typeof item> => item != null);
 
+  const memberSpotlights = memberFacts
+    .map((member) => {
+      const capacityMember = capacitySnapshot.members.find(
+        (capacity) => capacity.accountId === member.accountId
+      );
+
+      return {
+        name: member.displayName,
+        deliveredStoryPoints: member.deliveredStoryPoints,
+        completedIssues: member.completedIssues,
+        estimatorDeliveredPoints: member.estimatorDeliveredPoints,
+        handoffIssues: member.notCompletedIssues,
+        leadExecutionLabel: member.avgLeadExecutionLabel,
+        capacityGapLabel: capacityMember?.gapLabel ?? "N/A",
+        capacityGapValue: capacityMember?.capacityGap ?? 0,
+        href: `/members/${encodeURIComponent(member.accountId)}?sprint=${encodeURIComponent(selectedSprint.id)}`
+      };
+    })
+    .sort((left, right) => {
+      if (right.deliveredStoryPoints !== left.deliveredStoryPoints) {
+        return right.deliveredStoryPoints - left.deliveredStoryPoints;
+      }
+
+      if (right.completedIssues !== left.completedIssues) {
+        return right.completedIssues - left.completedIssues;
+      }
+
+      return left.name.localeCompare(right.name);
+    })
+    .slice(0, 4);
+
   return {
     currentSprint,
     selectedSprint,
@@ -505,6 +548,7 @@ export async function getReportsSnapshot(selectedSprintId?: string) {
       actions: retrospectiveActions,
       exportText: retrospectiveExport
     },
-    memberCallouts
+    memberCallouts,
+    memberSpotlights
   };
 }
