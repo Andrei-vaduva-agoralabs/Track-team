@@ -11,7 +11,7 @@ export const maxDuration = 60;
 export default async function DashboardPage({
   searchParams
 }: {
-  searchParams?: Promise<{ sprint?: string }>;
+  searchParams?: Promise<{ sprint?: string; syncStatus?: string; syncMessage?: string }>;
 }) {
   const params = await searchParams;
   const [snapshot, isAdmin] = await Promise.all([
@@ -55,6 +55,11 @@ export default async function DashboardPage({
             selectedSprintId={snapshot.selectedSprint?.id}
           />
           {isAdmin ? <RefreshBoardButton sprintId={snapshot.selectedSprint?.id} /> : null}
+          {params?.syncMessage ? (
+            <p className={`sync-message ${params.syncStatus === "success" ? "success" : "error"}`}>
+              {params.syncMessage}
+            </p>
+          ) : null}
           <small>
             {snapshot.config
               ? `Board ${snapshot.config.boardId} in ${snapshot.config.projectKey}. ${snapshot.teamCount} active team members in the curated roster.`

@@ -1,13 +1,3 @@
-"use client";
-
-import { useActionState } from "react";
-import { refreshBoardAction } from "@/app/dashboard/actions";
-
-const initialState = {
-  status: "idle" as const,
-  message: ""
-};
-
 function RefreshIcon() {
   return (
     <svg
@@ -30,20 +20,15 @@ function RefreshIcon() {
 }
 
 export function RefreshBoardButton({ sprintId }: { sprintId?: string }) {
-  const [state, action, pending] = useActionState(refreshBoardAction, initialState);
-
   return (
     <div className="sync-control">
-      <form action={action}>
+      <form action="/dashboard/refresh" method="post">
         <input type="hidden" name="sprintId" value={sprintId ?? ""} />
-        <button className="secondary-action" type="submit" disabled={pending}>
+        <button className="secondary-action" type="submit">
           <RefreshIcon />
-          <span>{pending ? "Syncing..." : "Refresh board"}</span>
+          <span>Refresh board</span>
         </button>
       </form>
-      {state.message ? (
-        <p className={`sync-message ${state.status}`}>{state.message}</p>
-      ) : null}
     </div>
   );
 }
