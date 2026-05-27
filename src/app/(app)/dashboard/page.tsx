@@ -249,8 +249,8 @@ export default async function DashboardPage({
                       </td>
                       <td>
                         <div className="metric-stack">
-                          <strong>{fact.deliveredStoryPoints} delivered</strong>
-                          <span>{fact.estimatorDeliveredPoints} estimated</span>
+                          <strong>{fact.assignedStoryPoints} assigned</strong>
+                          <span>{fact.deliveredStoryPoints} delivered</span>
                         </div>
                       </td>
                       <td>{fact.capacityDays != null ? `${fact.capacityDays}d` : "N/A"}</td>
